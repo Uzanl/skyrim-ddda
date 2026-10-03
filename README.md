@@ -43,9 +43,8 @@ Skyrim shows the result. The two processes talk through shared memory
   (Whiterun, Solitude) and steep stone stairs (Markarth) are not tested.
 - Periodic ~165 ms gaps in the published frames come from isolate learning cycles (10 "on
   demand" in the minute after a save reload), not from the ground.
-- Idea for later (with combat's ghosts): let Skyrim's navmesh lead the pawns (a ghost
-  follower per pawn, the DDDA pawn walks towards a point on its route). It would also
-  serve interiors. It needs a way to give a DDDA pawn a move target (not found yet).
+- Decided 2026-10-03: navigation stays DDDA's own (waypoint graph on the generated
+  ground). Letting Skyrim's navmesh lead the pawns was considered and dropped.
 
 Next, in order:
 1. **Pawns inside interiors**: export the interior cell's Havok, move the mapping to a
