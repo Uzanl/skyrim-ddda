@@ -37,6 +37,7 @@ drain events). An earlier detach without that crashed the game once.
 | `nearmodels.py CHAR [RADIUS] [--all]` | Objects positioned near a character |
 | `poke.py OBJ VT OFF f\|u VALUE` | **Writes.** One guarded write (only if the object's vtable matches) |
 | `framestat.py` | Frame transport header: frames, slots, reader heartbeat |
+| `ddfps.py [SECONDS] [INTERVAL] [HITCH_MS]` | DDDA frame rate and gaps between published frames, from the frame counter (also `ddfps.log`) |
 | `tracepasses.py [TRACE]` / `drawclass.py TRACE VBS` | Summarise a one-frame D3D9 trace into passes |
 | `partyvbs.py` | **Writes.** Hides the pawns for two traces and diffs the vertex buffers (party meshes) |
 | `sdis.py ADDR\|func\|calls\|xref\|vtref` | **Static** (reads `DDDA.exe` from disk, game not needed): disassembly, a function's calls, call/jmp xrefs, dword refs |
@@ -45,9 +46,9 @@ drain events). An earlier detach without that crashed the game once.
 | `sprops.py VTABLE` | **Static.** MtDTI property names and field offsets (vtable slot 3) |
 | `skyrim/addrlib.py ID...` / `skyrim/sky.py` | Skyrim 1.7.104 Address Library (format 5) lookups; live Skyrim reads |
 
-Note (2026-10-02): `framestat.py`, `gbufstat.py`, `depthfit.py` and `../follow_sim.py` read
-the v2 frame/camera mappings; since CameraCmd v3 and frame v3 (camera pose for
-reprojection) they no longer find them and need updating before use.
+Note: `gbufstat.py`, `depthfit.py` and `../follow_sim.py` read the v2 frame/camera
+mappings; since CameraCmd v3 and frame v3 (camera pose for reprojection) they no longer
+find them and need updating before use. `framestat.py` was updated to frame v3 on 2026-10-03.
 
 ## Obsolete or wrong (kept as history; do not trust their output)
 

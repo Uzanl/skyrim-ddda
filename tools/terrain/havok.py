@@ -39,8 +39,9 @@ STEP = 70.0          # DD cm: the largest step a pawn gets up (with the invisibl
 MAX_LEVELS = 8       # floors kept per cell (the highest ones)
 RAMP_RISE = 70.0     # DD cm: steps up to this get an invisible ramp in front (DDDA steps up less than Skyrim)
 RAMP_SLOPE = 0.7     # rise per run of those ramps (35 degrees)
+TERRAIN_LAYERS = (13, 17)  # COL_LAYER kTerrain, kGround: ramps start only at built floors (steps, decks, planks)
+BUILT_FLAT = 0.95    # normal y of a built floor (18 degrees): treads, planks, decks; not rock tops
 RAMP_RUN = 4         # raster cells (1 m) a ramp reaches out from its step
-LIP_MIN = 15.0       # DD cm: a rise this abrupt between neighbouring cells is a step (a lip), not a slope
 
 
 def read_cell(path):
@@ -128,17 +129,20 @@ class Live:
                     out.append((cx, cy))
         return out
 
-    def triangles(self, x0, z0, x1, z1):
-        """(tri (n, 3, 3), normals (n, 3)) touching the rectangle (DD global)."""
-        tris, ns = [], []
+    def triangles(self, x0, z0, x1, z1, flags=False):
+        """(tri (n, 3, 3), normals (n, 3)[, flags (n,)]) touching the rectangle (DD global)."""
+        tris, ns, fs = [], [], []
         for k in self._keys_for(x0, z0, x1, z1):
             c = self._cell(k)
             m = (c["hi"][:, 0] >= x0) & (c["lo"][:, 0] <= x1) & (c["hi"][:, 2] >= z0) & (c["lo"][:, 2] <= z1)
             tris.append(c["tri"][m])
             ns.append(c["n"][m])
+            fs.append(c["flags"][m])
         if not tris:
-            return np.zeros((0, 3, 3)), np.zeros((0, 3))
-        return np.concatenate(tris), np.concatenate(ns)
+            out = np.zeros((0, 3, 3)), np.zeros((0, 3)), np.zeros(0, np.uint32)
+        else:
+            out = np.concatenate(tris), np.concatenate(ns), np.concatenate(fs)
+        return out if flags else out[:2]
 
     # --- rasters over an area (cached per area) ---
     def raster(self, x0, z0, x1, z1):
@@ -150,13 +154,14 @@ class Live:
         x0, z0 = np.floor((x0 - 500.0) / RASTER) * RASTER, np.floor((z0 - 500.0) / RASTER) * RASTER
         x1, z1 = x1 + 500.0, z1 + 500.0
         nx, nz = int(np.ceil((x1 - x0) / RASTER)) + 1, int(np.ceil((z1 - z0) / RASTER)) + 1
-        tri, n = self.triangles(x0, z0, x0 + nx * RASTER, z0 + nz * RASTER)
-        pts, walk = sample(tri, n)
+        tri, n, fl = self.triangles(x0, z0, x0 + nx * RASTER, z0 + nz * RASTER, flags=True)
+        layer = (fl >> 8) & 0xFF
+        pts, walk, built = sample(tri, n, ~np.isin(layer, TERRAIN_LAYERS) & (n[:, 1] >= BUILT_FLAT))
         i = np.floor((pts[:, 0] - x0) / RASTER).astype(int)
         j = np.floor((pts[:, 2] - z0) / RASTER).astype(int)
         ok = (i >= 0) & (j >= 0) & (i < nx) & (j < nz)
         r = {"x0": x0, "z0": z0, "x1": x0 + (nx - 1) * RASTER, "z1": z0 + (nz - 1) * RASTER, "nx": nx, "nz": nz,
-             "cell": (j[ok] * nx + i[ok]), "y": pts[ok, 1], "walk": walk[ok], "occ": {}}
+             "cell": (j[ok] * nx + i[ok]), "y": pts[ok, 1], "walk": walk[ok], "built": built[ok], "occ": {}}
         self._r = r
         return r
 
@@ -233,50 +238,74 @@ class Live:
     def ramps(self, x0, z0, x1, z1):
         """Invisible ramps (n, 3, 3) in front of every reachable step up to RAMP_RISE in the
         area, like Skyrim's stair helpers: DDDA's characters step up less than Skyrim's, so a
-        bridge's plank edge or a deck's lip stopped them (2026-10-02)."""
+        bridge's plank edge or a deck's lip stopped them (2026-10-02).
+
+        Every reachable floor casts a RAMP_SLOPE cone downwards from its cell's edge, down
+        to RAMP_RISE below it; the ramp surface is the highest cone over a lower floor. A
+        staircase becomes one continuous sawtooth of ramps (the first version made one quad
+        per detected lip, and its "not a hillside" test rejected most stair risers, since the
+        next step also rises: pawns bounced off a Riverwood stair, 2026-10-03). Hillsides
+        gentler than RAMP_SLOPE are left alone; drops over RAMP_RISE (deck edges) too."""
         r = self.raster(x0, z0, x1, z1)
         nx, nz = r["nx"], r["nz"]
         R = self.reach(r, self._ground).reshape(nz, nx)
         F = np.where(np.isfinite(R), R, -np.inf)
 
         def shifted(A, dj, di, fill=-np.inf):
+            """N[j, i] = A[j + dj, i + di]."""
             N = np.full((nz, nx), fill)
-            N[max(dj, 0):nz + min(dj, 0), max(di, 0):nx + min(di, 0)] =                 A[max(-dj, 0):nz + min(-dj, 0), max(-di, 0):nx + min(-di, 0)]
+            N[max(-dj, 0):nz + min(-dj, 0), max(-di, 0):nx + min(-di, 0)] = \
+                A[max(dj, 0):nz + min(dj, 0), max(di, 0):nx + min(di, 0)]
             return N
 
-        # Lips: a cell with a 4-neighbour lower by LIP_MIN..RAMP_RISE where the drop is a break,
-        # not the slope going on (plank edges, kerbs; not a smooth hillside): the drop beats the
-        # slope on either side of it by LIP_MIN. Each lip edge (25 cm) gets one sloped quad from
-        # the edge down to the lower floor, RAMP_SLOPE steep, 2 cm wider on each side.
-        quads = []
-        jj, ii = np.mgrid[0:nz, 0:nx]
-        cx = r["x0"] + (ii + 0.5) * RASTER
-        cz = r["z0"] + (jj + 0.5) * RASTER
+        # Cones start only at flat built floors (steps, planks, decks): Skyrim's terrain
+        # collision is rough at 25 cm and got ramps over a quarter of a tile (180-260k
+        # triangles); rocks are static too, but their tops are not flat.
+        w = r["walk"] & r["built"]
+        top = np.full(nz * nx, -np.inf)
+        np.maximum.at(top, r["cell"][w], r["y"][w])
+        top = top.reshape(nz, nx)
         with np.errstate(invalid="ignore"):
-            for dj, di in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                n1 = shifted(F, -dj, -di)        # the neighbour in direction (di, dj)
-                n2 = shifted(F, -2 * dj, -2 * di)
-                back = shifted(F, dj, di)
-                drop = F - n1
-                slope = np.fmax(np.abs(back - F), np.abs(n1 - n2))
-                slope = np.where(np.isfinite(slope), slope, 0.0)
-                lip = (drop >= LIP_MIN) & (drop <= RAMP_RISE) & (drop - slope >= LIP_MIN)
-                lj, li = np.nonzero(lip)
-                if not len(lj):
-                    continue
-                top, low = F[lj, li], n1[lj, li]
-                ex = cx[lj, li] + di * RASTER / 2      # the edge between the two cells
-                ez = cz[lj, li] + dj * RASTER / 2
-                run = (top - low) / RAMP_SLOPE
-                tx, tz = -dj * (RASTER / 2 + 2.0), di * (RASTER / 2 + 2.0)  # along the edge
-                bx, bz = ex + di * run, ez + dj * run
-                a = np.stack([ex - tx, top, ez - tz], 1)
-                b = np.stack([ex + tx, top, ez + tz], 1)
-                c = np.stack([bx + tx, low - 5.0, bz + tz], 1)
-                d = np.stack([bx - tx, low - 5.0, bz - tz], 1)
-                quads.append(np.stack([a, b, c], 1))
-                quads.append(np.stack([a, c, d], 1))
-        return np.concatenate(quads) if quads else np.zeros((0, 3, 3))
+            B = np.where(np.isfinite(F) & (np.abs(top - F) <= LEVEL_GAP), F, -np.inf)
+        E = F.copy()
+        k = int(np.ceil(RAMP_RISE / RAMP_SLOPE / RASTER)) + 1
+        with np.errstate(invalid="ignore"):
+            for dj in range(-k, k + 1):
+                for di in range(-k, k + 1):
+                    if not (di or dj):
+                        continue
+                    run = max(0.0, (np.hypot(di, dj) - 0.5) * RASTER)  # from the higher cell's edge
+                    Q = shifted(B, dj, di)
+                    cone = Q - RAMP_SLOPE * run
+                    ok = (Q - F <= RAMP_RISE) & (cone > E)
+                    E = np.where(ok, cone, E)
+        ramp = np.isfinite(F) & (E > F + 3.0)
+        if not ramp.any():
+            return np.zeros((0, 3, 3))
+        # A cell is a step's top when any of its samples is: the real edge lies inside it, so a
+        # ramp ending at the cell's edge left a gap down to the lower tread. The step cells
+        # next to a ramp get a quad too (flat at their own height, or rising to the next step).
+        ramp |= np.isfinite(B) & ndi.binary_dilation(ramp, np.ones((3, 3), bool))
+        # One quad per ramp cell. Each corner is the same cone envelope evaluated at the corner
+        # itself (distance from the corner to each higher cell), over this cell's own floor, so
+        # the quads reach the step above at its edge and come down to the floor at the foot.
+        corner = {}
+        with np.errstate(invalid="ignore"):
+            for cj, ci in ((0, 0), (0, 1), (1, 0), (1, 1)):
+                best = F.copy()
+                for dj in range(-k, k + 1):
+                    for di in range(-k, k + 1):
+                        run = np.hypot(max(0, di - ci, ci - di - 1), max(0, dj - cj, cj - dj - 1)) * RASTER
+                        Q = shifted(B, dj, di)
+                        cone = Q - RAMP_SLOPE * run
+                        best = np.where((Q - F <= RAMP_RISE) & (cone > best), cone, best)
+                corner[(cj, ci)] = best
+        lj, li = np.nonzero(ramp)
+        x0c, z0c = r["x0"] + li * RASTER, r["z0"] + lj * RASTER
+        P = {key: np.stack([x0c + key[1] * RASTER, v[lj, li], z0c + key[0] * RASTER], 1)
+             for key, v in corner.items()}
+        a, b, c, d = P[(0, 0)], P[(0, 1)], P[(1, 1)], P[(1, 0)]
+        return np.concatenate([np.stack([a, b, c], 1), np.stack([a, c, d], 1)])
 
     def surface(self, X, Z, ref, r=None):
         """Walkable surface height at each point: the floor reached on foot (reach()), else
@@ -367,16 +396,19 @@ class Live:
         return r["occ"][k][j, i]
 
 
-def sample(tri, n, step=SAMPLE):
-    """Points on every triangle about `step` apart (vertices and centroids included), and
-    whether each point lies on a walkable (floor) triangle."""
+def sample(tri, n, tag=None, step=SAMPLE):
+    """Points on every triangle about `step` apart (vertices and centroids included),
+    whether each point lies on a walkable (floor) triangle, and (with `tag`, one bool per
+    triangle) each point's triangle tag."""
+    if tag is None:
+        tag = np.zeros(len(tri), bool)
     if not len(tri):
-        return np.zeros((0, 3)), np.zeros(0, bool)
+        return np.zeros((0, 3)), np.zeros(0, bool), np.zeros(0, bool)
     e1 = np.linalg.norm(tri[:, 1] - tri[:, 0], axis=1)
     e2 = np.linalg.norm(tri[:, 2] - tri[:, 0], axis=1)
     e3 = np.linalg.norm(tri[:, 2] - tri[:, 1], axis=1)
     m = np.clip(np.ceil(np.maximum(np.maximum(e1, e2), e3) / step), 1, 200).astype(int)
-    pts, walk = [], []
+    pts, walk, tags = [], [], []
     for k in np.unique(m):
         sel = np.where(m == k)[0]
         a, b = np.mgrid[0:k + 1, 0:k + 1]
@@ -388,7 +420,8 @@ def sample(tri, n, step=SAMPLE):
         P = T[:, None, 0] + u[None, :, None] * (T[:, None, 1] - T[:, None, 0]) + v[None, :, None] * (T[:, None, 2] - T[:, None, 0])
         pts.append(P.reshape(-1, 3))
         walk.append(np.repeat(n[sel, 1] >= WALKABLE, len(u)))
-    return np.concatenate(pts), np.concatenate(walk)
+        tags.append(np.repeat(tag[sel], len(u)))
+    return np.concatenate(pts), np.concatenate(walk), np.concatenate(tags)
 
 
 def main():

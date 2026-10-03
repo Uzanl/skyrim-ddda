@@ -5,7 +5,7 @@ running as its own process and computes the Arisen, the pawns and combat.
 Skyrim shows the result. The two processes talk through shared memory
 (SkyCraft-style bridge).
 
-## Status (2026-10-02)
+## Status (2026-10-03)
 
 | Step | State |
 |---|---|
@@ -21,53 +21,42 @@ Skyrim shows the result. The two processes talk through shared memory
 | 2c. Depth test against Skyrim (walls in front of pawns) | done, verified in game |
 | Reprojection to Skyrim's current camera (no drag when the camera moves, third person) | done, verified in game |
 | 3. Ground: DDDA's tiles regenerated from Skyrim's terrain around the party (terrain mode + streaming), with leaps at DDDA's map edges | done, verified in game (the party follows through Riverwood and beyond) |
-| Houses, fences, rocks, decks, stairs, bridges: Skyrim's live Havok collision in DDDA's tiles, invisible ramps at lips | done, verified in game ("a colisão funcionou") |
-| Pathfinding on that ground: floors reachable on foot, 2 m waypoint graph centred in narrow passages | built; the stairs improved, the dense graph is not tested yet |
+| Houses, fences, rocks, decks, stairs, bridges: Skyrim's live Havok collision in DDDA's tiles, continuous invisible ramps over steps and stairs | done, verified in game ("a colisão funcionou"; stairs: pawns climbed a Riverwood stair 2026-10-03, "funcionou") |
+| Pathfinding on that ground: floors reachable on foot, 2 m waypoint graph centred in narrow passages | done, verified in game 2026-10-03 (narrow bridge and a stair in Riverwood; 57-60 fps) |
 | Lighting: Skyrim's sun, ambient and fog on DDDA's lights | done, verified in game |
 | Streamer starts and stops with DDDA (no terminal) | done, verified |
 | Interiors | link pauses inside (the party waits outside); pawns inside interiors not started |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
-## Where we stopped (2026-10-02, night)
+## Where we stopped (2026-10-03)
 
-What changed this evening, and its state:
-
-- **Lighting v2: works** (the user: "acho que foi"). v1 had hooked lights that do not light
-  the world. The world lights are the weather-driven `uSky*` classes. The fixes were an
-  absolute scale, the "towards the light" direction, and reconnecting to a stale light
-  mapping after Skyrim reloads. [docs/lighting.md](docs/lighting.md). Shadows are not
-  started (see the "Later" section of that doc).
-- **Pawn hitches: fixed, not measured.** They came from the isolate learning cycles, which
-  scenery set off about every 5 s. Cycles now run only when a pawn loses a mesh, plus every
-  30 s. There is a live `nolearn` switch. [docs/bridge.md](docs/bridge.md), isolate.
-- **Live Havok collision: works** (the user: "a colisão funcionou"). DDDAGhosts exports
-  Skyrim's real static physics per loaded cell to `Data\SKSE\Plugins\DDDA_havok\`. The
-  streamer builds DDDA's collision from those triangles, with invisible ramps at
-  15-70 cm lips (DDDA steps up less than Skyrim). Navigation uses the floor reachable on
-  foot (bridges, docks, stairs) and a 2 m graph whose nodes snap to the middle of narrow
-  passages. The dense graph is **not tested**: the pawns climbed the stairs by "forcing"
-  a straight line before it. Also check whether 2500-node graphs slow DDDA down.
-  [docs/terrain-proxy.md](docs/terrain-proxy.md), "Live Havok collision".
-- **Interiors: pause only.** Entering a house sent the party to ungenerated DDDA ground
-  (flicker, knock-downs, a fall into the void). The Skyrim plugin now pauses the link
-  inside interiors; the party waits outside and rejoins on the way out. Verified by the
-  user: they stay outside.
-- **SkyCraft** (Minecraft in Skyrim, MIT, same Skyrim build) was read and its lessons are
-  written up: [docs/skycraft-notes.md](docs/skycraft-notes.md) (Havok export, hit
-  pipeline IDs, damage refunding, avoid nodes).
+- **Dense graph: works.** All tiles were regenerated in the 2 m layout (Riverwood and the
+  default start). The pawns crossed the narrow bridge "quase sem problemas" (the user).
+  DDDA stayed at 57-60 fps (`tools/recon/ddfps.py`).
+- **Stairs: fixed** (the user: "funcionou"). The pawns tried and bounced back: the lip
+  ramps left most stair risers uncovered. Ramps are now continuous cones from flat built
+  floors ([docs/terrain-proxy.md](docs/terrain-proxy.md), "Invisible ramps"). The main
+  pawn and a hired pawn climbed onto the deck; `tools/terrain/trail.py` records and draws
+  the trails.
+- Watch: ramps cost 9-42k triangles per Riverwood tile (5-14k before). A large city
+  (Whiterun, Solitude) and steep stone stairs (Markarth) are not tested.
+- Periodic ~165 ms gaps in the published frames come from isolate learning cycles (10 "on
+  demand" in the minute after a save reload), not from the ground.
+- Idea for later (with combat's ghosts): let Skyrim's navmesh lead the pawns (a ghost
+  follower per pawn, the DDDA pawn walks towards a point on its route). It would also
+  serve interiors. It needs a way to give a DDDA pawn a move target (not found yet).
 
 Next, in order:
-1. Test the dense graph on the stairs and the narrow bridge, and watch DDDA's performance.
-2. **Pawns inside interiors**: export the interior cell's Havok, move the mapping to a
+1. **Pawns inside interiors**: export the interior cell's Havok, move the mapping to a
    DDDA "arena" tile (like the edge leaps), and build the ground from the interior's
    triangles only.
-3. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
+2. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
    refunded and mirrored to their HP, then DDDA stand-ins for Skyrim enemies with damage
    going through Skyrim's hit pipeline. Pawn arrows and spells must also be drawn
    (isolate keeps only party meshes).
-4. Shadows, post-processing match, point lights ([docs/lighting.md](docs/lighting.md)).
-5. Performance at full resolution is not measured (each frame copies colour and mask, 2 x
+3. Shadows, post-processing match, point lights ([docs/lighting.md](docs/lighting.md)).
+4. Performance at full resolution is not measured (each frame copies colour and mask, 2 x
    8 MB, through the CPU). Options: a 1-byte mask, or reading back only the pawns' rect.
 
 **To play:**
@@ -161,7 +150,8 @@ src/skse_plugin/plugin.cpp   Skyrim SKSE plugin (x64): reads the party, sends Sk
 src/skse_ghosts/             DDDAGhosts (CommonLibSSE, build_skse.bat): ground raycasts and
   havok_export.cpp             live export of Skyrim's static collision per cell
 tools/terrain/               DDDA tile formats (sbc, way, arc) and the streamer (stream.py,
-                             havok.py = live collision, obstacles.py = .esm fallback)
+                             havok.py = live collision, obstacles.py = .esm fallback,
+                             trail.py = party trails over the floor and graphs)
 src/reshade_addon/addon.cpp  Skyrim ReShade add-on (x64): draws DDDA's frames over Skyrim
 external/reshade/include     ReShade 6.8.0 add-on headers (git sparse checkout)
 tools/bridge_reader/         x64 console reader for the bridge (test client)

@@ -250,9 +250,21 @@ rebuilding it offline.
   boxes only where no cell was exported. `sbcgen` now splits into groups of <= 20000
   triangles (u16 indices; the game's own tiles have many groups).
 - **Invisible ramps** (`Live.ramps`): DDDA's characters step up less than Skyrim's (they
-  pushed against a footbridge's plank edge). Every lip of 15-70 cm (a drop that beats the
-  slope on both sides by 15 cm, so not a hillside) gets one 35-degree quad from the edge to
-  the lower floor. 5-14k triangles per Riverwood tile; tiles reach ~80k triangles.
+  pushed against a footbridge's plank edge). Every flat **built** floor (not terrain or
+  ground layer, normal y >= 0.95: treads, planks, decks, roads) casts a 35-degree cone
+  downwards from its cell's edge, down to 70 cm below it; the ramp is the highest cone over
+  a lower floor, one quad per 25 cm cell with each corner evaluated at the corner, plus a
+  quad on the step cells next to a ramp (the real plank edge lies inside that cell). A
+  staircase becomes one continuous ramp. 9-42k ramp triangles per Riverwood tile.
+  - 2026-10-03: the first version (one quad per detected lip, kept only where the drop beat
+    the slope on both sides) rejected most stair risers, because the next step rises too.
+    The pawns bounced off a Riverwood stair (26 cm risers, 50 cm treads) and stayed at the
+    first step. With the cones, a check along 13 lines across that stair found no rise
+    above 10 cm, and in game the main pawn and a hired pawn climbed it (trail.py; the user:
+    "funcionou"). Cones from every floor covered a quarter of a tile (terrain at 25 cm is
+    rough: 180-260k triangles), hence built and flat floors only.
+  - Not covered: stairs steeper than about 45 degrees keep a small step at each riser;
+    drops over 70 cm get no ramp on purpose (deck edges).
 - **Navigation**: the node height is the floor **reachable on foot** (`Live.reach`): floor
   levels per 25 cm cell, joined with neighbours within STEP (70 cm, = ramp height) as a
   graph; levels connected to the .esm terrain seed are reachable (bridges from their ends,
@@ -260,7 +272,8 @@ rebuilding it offline.
   floor. Links are dropped where the floor jumps > 75 cm between samples 50 cm apart.
 - **Dense graph**: 4 m nodes missed stairs and narrow bridges (the pawns only went up by
   "forcing" a straight line). Now 50 x 50 nodes 2 m apart (the game's graphs have up to
-  ~830 nodes; ours 2500, untested for DDDA's performance), and a node whose spot is tight
+  ~830 nodes; ours 2500). Tested 2026-10-03 in Riverwood: the pawns crossed the narrow
+  bridge "quase sem problemas" (the user); DDDA stayed at 57-60 fps. A node whose spot is tight
   (< 1 m from an obstacle or an edge) moves within its cell to the clearest spot
   (`Live.snap`): the middle of a stair, a bridge, a gate. Changing the layout needs every
   tile regenerated (delete `stream_state.json`) with DDDA closed: a new graph's exp links
@@ -270,6 +283,9 @@ rebuilding it offline.
   moving bodies are not exported (fixed island only). Interiors: not yet.
 - Tools: `py havok.py list`, `py havok.py view M N` (live floor minus .esm terrain; solid
   cells, yellow = not exported).
+- `py trail.py record OUT.csv` logs the party's DD global positions at 10 Hz from the
+  bridge State; `py trail.py view OUT.csv [CX CZ R]` draws the trails over the reachable
+  floor and the waypoint graphs (where a pawn stops on a stair, a deck, a bridge).
 
 ## Open questions
 
