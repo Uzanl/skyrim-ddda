@@ -5,7 +5,8 @@ Steam build 2364871. `DDDA.exe` is 32-bit and loads at 0x400000 with no ASLR.
 **Body height (2026-10-03, tools/recon/pawnheight.py):** characters keep the MT Framework
 uCoord layout: position `+0x40`, rotation `+0x50`, scale `+0x60` (x, y, z). The y scale
 (`+0x64`) is the editor's body height: Jack Shriker 0.74 (visibly the shortest), the Arisen
-0.89, Diana 0.96, Mariana 1.05. The bridge sends it as `Actor.heightScale` for the labels.
+0.89, Diana 0.96, Mariana 1.05. Height in DDDA's editor = 174.7 cm x scale (Mariana:
+1.0473, 183 cm in game; one point, to confirm with another pawn). The bridge sends it as `Actor.heightScale` for the labels.
 
 ## Characters (the Arisen and party pawns)
 

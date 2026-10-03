@@ -895,9 +895,9 @@ void Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D11_VIE
 // Screen sizes follow DDDA's at 1080p and scale with the back buffer's height.
 // The bar's bottom is the same gap above every pawn's head: the head top is
 // kLabelHeadTopDd x the pawn's height scale (bridge Actor.heightScale, the editor's body
-// height; 0.74-1.05 in the user's party). 185 from Jack (0.74): a bar at 190 x 0.74 = 141
-// cm touched his head (2026-10-03).
-constexpr float kLabelHeadTopDd = 185.0f;   // DD cm, head top at scale 1
+// height; 0.74-1.05 in the user's party). DDDA's editor shows height = 174.7 cm x scale:
+// Mariana, scale 1.0473, is 183 cm in game (the user, 2026-10-03).
+constexpr float kLabelHeadTopDd = 174.7f;   // DD cm, head top at scale 1
 constexpr float kLabelGapDd = 15.0f;        // DD cm between the head and the bar
 constexpr float kLabelFadeStart = 1750.0f;  // Skyrim units (25 m): labels fade out...
 constexpr float kLabelFadeEnd = 2450.0f;    // ...until 35 m
