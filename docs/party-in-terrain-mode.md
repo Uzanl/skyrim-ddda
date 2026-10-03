@@ -60,6 +60,58 @@ verified in game the same day.
 - DDDA's own warp (pawns far from the Arisen are brought to it) is damage-free; the
   bridge leaves pawns to it instead of moving them down itself.
 
+## Open bug: pawns fall into the void when the save is away from the link spot (2026-10-03)
+
+Reported by the user (parked to fix later): when the Arisen is not at the exact spot
+where the save was made, the pawns may fall into the void and die. Not reproduced with a
+log yet. What the code and the 2026-10-03 log say:
+
+**How the link works now.** At the link the Arisen is put at the Dragonborn's mapped spot
+(kinematic). `StartProtect` holds the pawns, asleep, next to that spot for a fixed
+`kProtectMs` = 2.5 s, then they wake with DDDA's physics. Pawns are only taken UP
+(`PawnProtectUnsafe`, rule from before `SyncAdjust` existed).
+
+**Log of a good link (19:54:49, 2026-10-03):** the save was in 63m52n, the link moved
+the party to 66m47n (5 tiles away). DDDA opened the overlay's collision of the target tile
+1.7 s after the link, of the tiles two rows over at 2.8-3.1 s (after the protection had
+ended) and the waypoint graphs only at 6-8 s. It worked that time, with little margin.
+
+**Likely causes (to confirm with a log of a bad case):**
+1. **Fixed 2.5 s protection vs. variable tile loading.** The farther the save is from
+   the link spot, the more DDDA has to load; slower loads, or a tile the streamer has not
+   generated yet (first session, empty overlay), leave the pawns awake over no collision.
+2. **Tiles loaded before they were generated.** DDDA reads a tile only when it loads. If
+   the save spot is within about 2 tiles of the link spot, those tiles were already loaded
+   at save load, with the game's original ground or an older mapping's; the pawns are
+   set at Skyrim's height over ground that does not match.
+3. **Pawns left behind.** A pawn above the target (+1 m) is not taken (only upwards); it
+   stays at the save spot, waiting for DDDA's own warp. When the Arisen goes far, the
+   tiles under that pawn unload and it falls before the warp.
+4. **Hold released at the link.** With a save made over a different ground height, the
+   held pawns wake far above (fatal fall) or below (void) the ground.
+
+**Possible fixes, in order of cost:**
+1. **Protect until the ground is really there** (uses the overlay): the overlay hook
+   knows when DDDA opens a generated tile. Keep the pawns asleep at the target until DDDA
+   has opened the overlay's collision of the target tile and its 8 neighbours after the
+   link (time-out, say 15 s, logged). Covers causes 1 and 4.
+2. **Take pawns down too:** with `SyncAdjust` a downward teleport no longer reads as a
+   fall (it was the reason for "only up"). Every pawn goes to the target, nobody is left
+   on tiles that unload. Covers cause 3. Needs a test (fall damage, knock-down).
+3. **Link only onto fresh tiles:** if the link spot is within the loaded radius of the
+   save spot and those tiles were not read from the overlay, make the link a leap to a
+   spot 6+ tiles away (`leap_target`, as at map edges), so DDDA loads generated tiles
+   there. Covers cause 2.
+4. **Generate before linking:** the streamer builds the 5 x 5 tiles around the link spot
+   before the plugin starts the link (as it already does for leaps, ~7 s); usually ready
+   anyway, since the overlay now persists between sessions.
+5. **Ground probe per pawn** (most robust, needs reverse engineering): wake a pawn only
+   when DDDA's own collision has ground under it (a DDDA raycast or the adjust's ground
+   distance, see `mGroundDistance` in docs/ghosts.md).
+
+Fixes 1 and 2 together should make the link work from any spot on DDDA's map; 3 for
+links next to the save spot.
+
 ## Knocked-down pawns go back to the Rift
 
 A pawn at 0 HP is knocked down; if nobody helps it up within a few seconds it returns

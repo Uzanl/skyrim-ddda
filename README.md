@@ -25,15 +25,19 @@ Skyrim shows the result. The two processes talk through shared memory
 | Pathfinding on that ground: floors reachable on foot, 2 m waypoint graph centred in narrow passages | done, verified in game 2026-10-03 (narrow bridge and a stair in Riverwood; 57-60 fps) |
 | Lighting: Skyrim's sun, ambient and fog on DDDA's lights | done, verified in game |
 | Streamer starts and stops with DDDA (no terminal) | done, verified |
-| Bridge session only (`play_bridge.bat`): DDDA from Steam stays the plain game; generated tiles in an overlay, the game's files never written | built 2026-10-03; overlay and session tested outside the game (test program); not tested in game |
+| Bridge session only (`play_bridge.bat`): DDDA from Steam stays the plain game; generated tiles in an overlay, the game's files never written | overlay verified in game 2026-10-03 (log: session started, 59 tiles read from the overlay around a link); plain start from Steam not checked in game yet |
 | Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
-| Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou") |
+| Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou"); bar lowered, narrower and thicker the same day: built and installed, not seen in game |
+| Pawns fall into the void when the save is away from the link spot | open bug, reported 2026-10-03; analysis in docs/party-in-terrain-mode.md |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
 ## Where we stopped (2026-10-03, evening)
 
-- **The project no longer touches the plain game** (built, not tested in game). The user
+- **Open bug (the user, parked):** if the Arisen is not where the save was made, pawns
+  may fall into the void and die. Likely cause and fixes in
+  [docs/party-in-terrain-mode.md](docs/party-in-terrain-mode.md), "Open bug".
+- **The project no longer touches the plain game** (overlay verified in game by the log). The user
   found pawns that no longer followed in plain DDDA: the streamer had rewritten 204
   tiles in the game folder (Skyrim's collision and graphs, an invisible "map on top")
   and left "hold" on (the party's physics asleep while unlinked). All 376 archives were
@@ -69,6 +73,7 @@ Skyrim shows the result. The two processes talk through shared memory
   pawns was considered and dropped.
 
 Next, in order:
+0. The void bug above (fix 1 first: protection until the target's tiles came from the overlay).
 1. Interiors, polish: measure the entry with the arena worker, larger interiors (dungeons are not tested; the graph inside a small house splits into
    islands around furniture), interior cells connected by load doors.
 2. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
