@@ -36,9 +36,10 @@ Skyrim shows the result. The two processes talk through shared memory
   an "arena" far away in DDDA's map and writes `DDDABridge_interior.ini`; the plugin
   switches to that mapping and the party leaps in. Leaving is immediate (the world's
   ground is still there). [docs/terrain-proxy.md](docs/terrain-proxy.md), "Interiors".
-  - Entering takes 4-6 s: the export (0.5 s after the cell attaches), then the arena
-    (1.9 s alone, 3-6 s while the main loop generates a world tile in the same Python
-    process). Re-entering the same interior reuses its arena (0.1 s in a simulation).
+  - Entering took 4-6 s: the export (0.5 s after the cell attaches), then the arena
+    (3-6 s while the main loop generated a world tile in the same Python process). The
+    arena now has its own worker process (offline: 1.8 s under load); not measured in
+    game yet. Re-entering the same interior reuses its arena (0.1 s in a simulation).
   - Fixed on the way: pawns were dragged "like a magnet" after arriving (the protection
     held them at the Arisen's current spot each frame; now at the arrival spot), and were
     invisible 1.7 s (the isolate forgot the party's buffers when the link paused; now it
@@ -53,8 +54,7 @@ Skyrim shows the result. The two processes talk through shared memory
   pawns was considered and dropped.
 
 Next, in order:
-1. Interiors, polish: faster entry (build the arena while the world's streaming waits),
-   larger interiors (dungeons are not tested; the graph inside a small house splits into
+1. Interiors, polish: measure the entry with the arena worker, larger interiors (dungeons are not tested; the graph inside a small house splits into
    islands around furniture), interior cells connected by load doors.
 2. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
    refunded and mirrored to their HP, then DDDA stand-ins for Skyrim enemies with damage

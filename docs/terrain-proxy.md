@@ -311,8 +311,13 @@ mapping it sent the party to ungenerated ground (2026-10-02), so the link used t
   the plugin goes back to the world's mapping (a leap down, DDDA's own warp brings the
   pawns; immediate). The streamer removes the ini, puts the arena tiles back into its
   "to generate" set and keeps the last arena for a quick re-entry while intact.
-- Measured 2026-10-03: entering takes 4-6 s, of which the arena 3-6 s while the main
-  loop generates a world tile in the same process (1.9 s alone).
+- Measured 2026-10-03: entering took 4-6 s, of which the arena 3-6 s while the main
+  loop generated a world tile in the same process (Python's interpreter lock). The arena
+  is now built in a worker process started with the streamer (it stays, so numpy and
+  scipy are loaded once; DDDA's job object kills it with the streamer), and the game's
+  original archives are parsed once per worker (`original_part`). Offline, a 15k-triangle
+  house: 1.8 s while a world tile is generated (2.4 s before); outputs byte-identical.
+  Not measured in game yet.
 - Limits: the 2 m graph inside a small house splits into islands around furniture (the
   pawns stay close to the Arisen there anyway); dungeons (several tiles, up to the map's
   depth of 5 tiles from an edge) and cells joined by load doors are not tested.

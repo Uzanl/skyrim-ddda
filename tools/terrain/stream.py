@@ -192,9 +192,35 @@ def install(path, data):
     os.replace(tmp, path)
 
 
+_has_way = {}
+
+
 def has_way(m, n):
-    p = way_arc(m, n)
-    return os.path.exists(p) and any(e[1] == WAY_TYPE for e in arc.entries(original(p)))
+    """The game's own tile (m, n) has a waypoint graph (asked for every border link: cached)."""
+    if (m, n) not in _has_way:
+        p = way_arc(m, n)
+        _has_way[(m, n)] = os.path.exists(p) and any(e[1] == WAY_TYPE for e in arc.entries(original(p)))
+    return _has_way[(m, n)]
+
+
+_originals = {}
+
+
+def original_part(path, kind):
+    """(archive, entry name, parsed) of the game's own collision ("sbc": sbc.parse of the
+    st100h_ entry) or graph ("way": node count) of a tile, cached while the archive is
+    unchanged (an arena re-read 25 originals per entry)."""
+    src = original(path)
+    key = (src, os.path.getmtime(src), kind)
+    if key not in _originals:
+        if kind == "sbc":
+            name, entry = next((e[0], e) for e in arc.entries(src) if e[1] == SBC_TYPE and "st100h_" in e[0])
+            parsed = sbc.parse(arc.data(entry))
+        else:
+            name, entry = next((e[0], e) for e in arc.entries(src) if e[1] == WAY_TYPE)
+            parsed = len(way.parse(arc.data(entry))["nodes"])
+        _originals[key] = (src, name, parsed)
+    return _originals[key]
 
 
 # --- generation ------------------------------------------------------------------------
@@ -202,9 +228,7 @@ def gen_collision(m, n, H):
     path = col_arc(m, n)
     if not os.path.exists(path):
         return False
-    src = original(path)
-    name, entry = next((e[0], e) for e in arc.entries(src) if e[1] == SBC_TYPE and "st100h_" in e[0])
-    template = sbc.parse(arc.data(entry))
+    src, name, template = original_part(path, "sbc")
     ox, oz = (n - 50) * TILE, (m - 50) * TILE
     ls = np.arange(-COL_CELL, TILE + 2 * COL_CELL, COL_CELL)
     LX, LZ = np.meshgrid(ls, ls)
@@ -240,13 +264,11 @@ def gen_way(m, n, H):
     path = way_arc(m, n)
     if not has_way(m, n):
         return False
-    src = original(path)
-    name, entry = next((e[0], e) for e in arc.entries(src) if e[1] == WAY_TYPE)
-    orig_count = len(way.parse(arc.data(entry))["nodes"])
+    src, name, orig_count = original_part(path, "way")
     # heights of this graph's nodes plus a 1-node border (the neighbours' edge nodes)
-    ii = np.arange(-1, NODES + 1)
-    X = np.array([[node_xz(m, n, i, j)[0] for i in ii] for j in ii])
-    Z = np.array([[node_xz(m, n, i, j)[1] for i in ii] for j in ii])
+    jj, ii = np.mgrid[-1:NODES + 1, -1:NODES + 1]
+    X, Z = node_xz(m, n, ii, jj)
+    X, Z = X.astype(np.float64), Z.astype(np.float64)
     if H.live is not None:  # tight spots: the node moves to the middle of the passage
         C = covered(H, X, Z)
         if C.any():
@@ -390,9 +412,7 @@ def gen_arena_collision(m, n, H):
     path = col_arc(m, n)
     if not os.path.exists(path):
         return False
-    src = original(path)
-    name, entry = next((e[0], e) for e in arc.entries(src) if e[1] == SBC_TYPE and "st100h_" in e[0])
-    template = sbc.parse(arc.data(entry))
+    src, name, template = original_part(path, "sbc")
     ox, oz = (n - 50) * TILE, (m - 50) * TILE
     ls = np.arange(-COL_CELL, TILE + 2 * COL_CELL, COL_CELL)
     a0, a1 = ls[0], ls[-1]
@@ -420,6 +440,27 @@ def build_arena(cell, cfg, tiles):
         gen_arena_collision(m, n, H)
         gen_way(m, n, H)
     return time.time() - t0
+
+
+# The arena is built in a separate process: in a thread of the streamer's own process it
+# shared Python's interpreter lock with the world tile being generated and took 3-6 s
+# instead of 1.9 (2026-10-03). The worker starts with the streamer and stays, so an entry
+# does not pay for starting Python and loading numpy and scipy.
+def _arena_worker_init():
+    if sys.stdout is None or not sys.stdout.isatty():  # pythonw: no console, log with the streamer
+        sys.stdout = sys.stderr = open(os.path.join(HERE, "stream.log"), "a", buffering=1, encoding="utf-8")
+
+
+def _arena_warm():
+    interior()
+    return os.getpid()
+
+
+def arena_pool():
+    from concurrent.futures import ProcessPoolExecutor
+    pool = ProcessPoolExecutor(max_workers=1, initializer=_arena_worker_init)
+    pool.submit(_arena_warm)
+    return pool
 
 
 def gen_tile(m, n, H):
@@ -609,6 +650,7 @@ class Interiors(threading.Thread):
         self.lock = threading.Lock()
         self.built, self.left = [], []
         self.last = (None, None, frozenset())  # the last arena (cell, cfg, tiles) while intact
+        self.pool = arena_pool()
 
     def take_built(self):
         with self.lock:
@@ -662,7 +704,13 @@ class Interiors(threading.Thread):
                 acfg, tiles = plan
                 with self.lock:
                     self.built.append(frozenset(tiles))
-                dt = build_arena(cell, acfg, tiles)
+                try:
+                    dt = self.pool.submit(build_arena, cell, acfg, tiles).result()
+                except Exception as e:  # noqa: BLE001 (a dead worker: build here, start another)
+                    print(f"{time.strftime('%H:%M:%S')} arena worker failed ({e!r}); building in the streamer",
+                          flush=True)
+                    self.pool = arena_pool()
+                    dt = build_arena(cell, acfg, tiles)
                 write_interior_ini(cell, acfg)
                 inside = (cell, acfg, tiles)
                 with self.lock:
