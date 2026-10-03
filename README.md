@@ -26,6 +26,7 @@ Skyrim shows the result. The two processes talk through shared memory
 | Lighting: Skyrim's sun, ambient and fog on DDDA's lights | done, verified in game |
 | Streamer starts and stops with DDDA (no terminal) | done, verified |
 | Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
+| Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou") |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
@@ -50,6 +51,9 @@ Skyrim shows the result. The two processes talk through shared memory
 - **Stairs and the dense graph: work** (earlier today). Ramps are continuous cones from
   flat built floors; they cost 9-42k triangles per Riverwood tile. A large city and steep
   stone stairs are not tested.
+- **Pawn labels: work** (the user: "funcionou"). The add-on draws DDDA's name, health
+  bar and party-colour dot above each pawn; names come from DDDA's save records
+  ([docs/bridge.md](docs/bridge.md), "Pawn labels").
 - Decided 2026-10-03: navigation stays DDDA's own. Letting Skyrim's navmesh lead the
   pawns was considered and dropped.
 

@@ -31,7 +31,7 @@ cl %CFLAGS% "%ROOT%tools\bridge_reader\main.cpp" /Fo"%ROOT%build\x64\\" /Fe"%ROO
 cl %CFLAGS% "%ROOT%tools\cam_driver\main.cpp" /Fo"%ROOT%build\x64\cam_driver.obj" /Fe"%ROOT%build\x64\cam_driver.exe" || exit /b 1
 cl %CFLAGS% /LD "%ROOT%src\skse_plugin\plugin.cpp" /Fo"%ROOT%build\x64\\" /Fe"%ROOT%build\x64\DDDABridge.dll" /link shell32.lib ole32.lib || exit /b 1
 rem ReShade add-on (headers fetched into external\reshade, tag v6.8.0).
-cl %CFLAGS% /LD /I"%ROOT%external\reshade\include" "%ROOT%src\reshade_addon\addon.cpp" /Fo"%ROOT%build\x64\addon.obj" /Fe"%ROOT%build\x64\DDDABridge.addon64" || exit /b 1
+cl %CFLAGS% /LD /I"%ROOT%external\reshade\include" "%ROOT%src\reshade_addon\addon.cpp" /Fo"%ROOT%build\x64\addon.obj" /Fe"%ROOT%build\x64\DDDABridge.addon64" /link gdi32.lib || exit /b 1
 endlocal
 
 echo build ok

@@ -201,6 +201,25 @@ static_assert(offsetof(LightCmd, updates) == 16);
 static_assert(offsetof(LightCmd, hour) == 24);
 static_assert(offsetof(LightCmd, fogNear) == 88);
 
+// --- Party names (DDDA bridge -> Skyrim ReShade add-on) --------------------------
+// The pawns' names as DDDA shows them above their heads, so the add-on draws the same
+// labels in Skyrim (name, health bar, party colour dot). UTF-8, NUL-terminated; empty
+// = unknown (the add-on then shows no name).
+inline constexpr wchar_t kNamesMappingName[] = L"Local\\DDDA_SkyrimBridge_names_v1";
+inline constexpr uint32_t kNamesMagic = 0x4E424444;  // "DDBN"
+inline constexpr uint32_t kNamesVersion = 1;
+inline constexpr uint32_t kNameBytes = 64;
+
+struct Names {
+    uint32_t magic;
+    uint32_t version;
+    volatile uint32_t seq;  // seqlock, as in State
+    uint32_t reserved;
+    char name[kRoleCount][kNameBytes];
+};
+
+static_assert(sizeof(Names) == 16 + 4 * 64);
+
 static_assert(offsetof(CameraCmd, updates) == 16);
 static_assert(offsetof(CameraCmd, pos) == 32);
 static_assert(offsetof(CameraCmd, body) == 72);

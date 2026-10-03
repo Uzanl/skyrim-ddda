@@ -228,6 +228,20 @@ arrived for 250 ms. So the overlay starts only after a save has loaded and the
 camera is linked, and never shows at the main menu, on loading screens or as a
 frozen frame. DDDA likewise reads frames back only while party-only rendering is on.
 
+### Pawn labels (2026-10-03, verified in game)
+DDDA's floating name, health bar and party-colour dot above each pawn are filtered out
+with the rest of its HUD, so the add-on draws them itself at Skyrim's resolution
+(`DrawLabels`, after the party). Data: the bridge State (positions, HP) and the
+`Names` mapping (`Local\DDDA_SkyrimBridge_names_v1`, written by the DDDA bridge from
+each pawn's save-data record, `[char+0x3DEC]+0x70C`, so hired pawns update by
+themselves). A pawn's DD position reaches Skyrim through the last camera command: its
+DD camera position is the Skyrim camera it was made from (`skyPose`). Look copied from
+a DDDA screenshot: Palatino Linotype rendered with GDI into a texture (warm white,
+soft shadow), a thin yellow-green bar with grey for the missing health, a dot in the
+party slot's colour (main pawn red, first hired yellow, second blue). Fixed screen size
+(scaled from 1080p), placed 215 DD cm above the feet; fades out from 25 to 35 m and is
+hidden when Skyrim's depth at the head is nearer than the head (a wall in between).
+
 ### Depth test (step 2c)
 - **DDDA's G-buffer RGB is a 24-bit perspective depth** (R high byte, G, B low;
   `00FFFFFF` = far). Measured 2026-10-01 with `tools/recon/depthfit.py`: 307

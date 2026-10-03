@@ -45,10 +45,12 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "../common/bridge_shared.h"
 #include "../common/frame_shared.h"
 
 extern "C" __declspec(dllexport) const char* NAME = "DDDABridge";
@@ -196,6 +198,43 @@ float4 ps_mesh(float4 pos : SV_Position, float2 uvOld : TEXCOORD0, float zOld : 
         if (zNew > sky * 1.02 + 5) discard;  // something of Skyrim's is in front
     }
     return float4(c.rgb, a);
+}
+)";
+
+// Pawn labels (see "Pawn labels" below): one quad per call, placed in pixels.
+const char kLabelShader[] = R"(
+Texture2D label : register(t0);
+Texture2D<float> skyDepth : register(t2);
+SamplerState smp : register(s0);
+cbuffer Label : register(b0) {
+    float4 rect;     // left, top, right, bottom in clip space
+    float4 uvRect;
+    float4 color;    // rgb, alpha (fade)
+    float4 mode;     // x: 0 solid, 1 text, 2 dot; y: occlusion test; z: head depth (Skyrim units)
+    float4 headPix;  // xy: the head's pixel; z, w: Skyrim near, far
+};
+float Linear(float d, float n, float f) { return n * f / (f - d * (f - n)); }
+void vs_label(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0) {
+    float2 t = float2(id & 1, id >> 1);
+    pos = float4(lerp(rect.x, rect.z, t.x), lerp(rect.y, rect.w, t.y), 0, 1);
+    uv = lerp(uvRect.xy, uvRect.zw, t);
+}
+float4 ps_label(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
+    if (mode.y > 0) {  // a wall of Skyrim's between the camera and the head hides the label
+        float sky = Linear(skyDepth.Load(int3(headPix.xy, 0)), headPix.z, headPix.w);
+        if (sky < mode.z * 0.97 - 10) discard;
+    }
+    if (mode.x == 1) {
+        float4 t = label.Sample(smp, uv);
+        return float4(t.rgb, t.a * color.a);
+    }
+    if (mode.x == 2) {  // the party colour dot: a bright core and a soft glow
+        float r = length(uv * 2 - 1);
+        float core = saturate((0.55 - r) * 8), glow = saturate(1 - r) * 0.55;
+        float3 c = lerp(color.rgb, 1.0, core * 0.35);
+        return float4(c, saturate(core + glow) * color.a);
+    }
+    return color;
 }
 )";
 
@@ -363,7 +402,10 @@ void ReleaseDepthCopy() {
     g_depthDesc = {};
 }
 
+void ReleaseLabels();
+
 void ReleaseAll() {
+    ReleaseLabels();
     SafeRelease(g_srv);
     SafeRelease(g_tex);
     SafeRelease(g_gbufSrv);
@@ -388,7 +430,8 @@ void ReleaseAll() {
     g_dev = nullptr;
 }
 
-bool Compile(const char* entry, const char* target, ID3DBlob** out) {
+bool Compile(const char* entry, const char* target, ID3DBlob** out, const char* src = kShader,
+             size_t len = sizeof(kShader) - 1) {
     using D3DCompileFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, LPCSTR,
                                           LPCSTR, UINT, UINT, ID3DBlob**, ID3DBlob**);
     static D3DCompileFn compile = [] {
@@ -397,7 +440,7 @@ bool Compile(const char* entry, const char* target, ID3DBlob** out) {
     }();
     if (!compile) return false;
     ID3DBlob* errors = nullptr;
-    HRESULT hr = compile(kShader, sizeof(kShader) - 1, "ddda_bridge", nullptr, nullptr, entry, target,
+    HRESULT hr = compile(src, len, "ddda_bridge", nullptr, nullptr, entry, target,
                          D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, out, &errors);
     if (errors) {
         Log(reshade::log::level::error, "DDDABridge: shader %s: %s", entry,
@@ -843,6 +886,349 @@ void Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D11_VIE
     SafeRelease(oldSampler);
 }
 
+// --- Pawn labels -------------------------------------------------------------------
+// DDDA shows each pawn's name above its head, with a thin health bar under it (green:
+// current health, grey: the rest up to its current maximum) and a dot in the pawn's
+// party colour (main pawn red, first hired yellow, second hired blue). The DDDA HUD is
+// filtered out of the frames (isolate), so the labels are drawn here, at Skyrim's
+// resolution, from the bridge State (positions, health) and Names (DDDA bridge).
+// Screen sizes follow DDDA's at 1080p and scale with the back buffer's height.
+constexpr float kLabelHeadDd = 215.0f;      // DD cm above the feet
+constexpr float kLabelFadeStart = 1750.0f;  // Skyrim units (25 m): labels fade out...
+constexpr float kLabelFadeEnd = 2450.0f;    // ...until 35 m
+constexpr float kLabelFontPx = 30.0f;       // at 1080 lines
+constexpr float kLabelBarW = 230.0f, kLabelBarH = 6.0f, kLabelDot = 16.0f;
+const float kLabelDotColor[bridge::kRoleCount][3] = {
+    {1, 1, 1}, {0.86f, 0.16f, 0.16f}, {0.92f, 0.78f, 0.15f}, {0.22f, 0.32f, 0.95f}};
+
+ID3D11VertexShader* g_vsLabel = nullptr;
+ID3D11PixelShader* g_psLabel = nullptr;
+ID3D11Buffer* g_labelCb = nullptr;
+
+struct NameTex {
+    std::string name;
+    int px = 0;
+    ID3D11Texture2D* tex = nullptr;
+    ID3D11ShaderResourceView* srv = nullptr;
+    int w = 0, h = 0, pad = 0;
+};
+NameTex g_nameTex[bridge::kRoleCount];
+
+void ReleaseLabels() {
+    SafeRelease(g_vsLabel);
+    SafeRelease(g_psLabel);
+    SafeRelease(g_labelCb);
+    for (NameTex& t : g_nameTex) {
+        SafeRelease(t.srv);
+        SafeRelease(t.tex);
+        t = NameTex{};
+    }
+}
+
+bool InitLabels() {
+    if (g_vsLabel) return true;
+    ID3DBlob *vs = nullptr, *ps = nullptr;
+    bool ok = Compile("vs_label", "vs_5_0", &vs, kLabelShader, sizeof(kLabelShader) - 1) &&
+              Compile("ps_label", "ps_5_0", &ps, kLabelShader, sizeof(kLabelShader) - 1) &&
+              SUCCEEDED(g_dev->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &g_vsLabel)) &&
+              SUCCEEDED(g_dev->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &g_psLabel));
+    SafeRelease(vs);
+    SafeRelease(ps);
+    D3D11_BUFFER_DESC cb = {};
+    cb.ByteWidth = 80;
+    cb.Usage = D3D11_USAGE_DYNAMIC;
+    cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    ok = ok && SUCCEEDED(g_dev->CreateBuffer(&cb, nullptr, &g_labelCb));
+    if (!ok) {
+        Log(reshade::log::level::error, "DDDABridge: label setup failed; no pawn labels");
+        ReleaseLabels();
+    }
+    return ok;
+}
+
+// The name rendered by GDI (a serif like DDDA's, grey-scale antialiasing) into a texture:
+// warm white text over a soft dark shadow.
+bool MakeNameTex(NameTex& t, const std::string& name, int px) {
+    SafeRelease(t.srv);
+    SafeRelease(t.tex);
+    t.name = name;
+    t.px = px;
+    wchar_t wide[128] = {};
+    MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wide, 127);
+    const int len = static_cast<int>(wcslen(wide));
+    HDC dc = CreateCompatibleDC(nullptr);
+    HFONT font = CreateFontW(-px, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
+                             CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Palatino Linotype");
+    HGDIOBJ oldFont = SelectObject(dc, font);
+    SIZE size = {};
+    GetTextExtentPoint32W(dc, wide, len, &size);
+    t.pad = px / 6 + 2;
+    t.w = size.cx + 2 * t.pad;
+    t.h = size.cy + 2 * t.pad;
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = t.w;
+    bi.bmiHeader.biHeight = -t.h;  // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    bool ok = bmp && bits && size.cx > 0;
+    if (ok) {
+        HGDIOBJ oldBmp = SelectObject(dc, bmp);
+        memset(bits, 0, static_cast<size_t>(t.w) * t.h * 4);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        TextOutW(dc, t.pad, t.pad, wide, len);
+        GdiFlush();
+        const auto* src = static_cast<const uint8_t*>(bits);
+        std::vector<float> cov(static_cast<size_t>(t.w) * t.h);
+        for (size_t i = 0; i < cov.size(); ++i) cov[i] = src[i * 4 + 1] / 255.0f;
+        // Shadow: the coverage spread by ~px/12 and moved down-right a little.
+        const int r = (std::max)(1, px / 12), off = (std::max)(1, px / 20);
+        std::vector<uint8_t> rgba(cov.size() * 4);
+        for (int y = 0; y < t.h; ++y) {
+            for (int x = 0; x < t.w; ++x) {
+                float sh = 0;
+                for (int dy = -r; dy <= r; ++dy) {
+                    for (int dx = -r; dx <= r; ++dx) {
+                        const int sx = x - off + dx, sy = y - off + dy;
+                        if (sx < 0 || sy < 0 || sx >= t.w || sy >= t.h) continue;
+                        const float fall = 1.0f - 0.5f * static_cast<float>(dx * dx + dy * dy) / (r * r + 1);
+                        sh = (std::max)(sh, cov[static_cast<size_t>(sy) * t.w + sx] * fall);
+                    }
+                }
+                const float c = cov[static_cast<size_t>(y) * t.w + x];
+                const float a = (std::max)(c, sh * 0.75f);
+                const float k = a > 0 ? c / a : 0;  // text over its shadow
+                uint8_t* o = &rgba[(static_cast<size_t>(y) * t.w + x) * 4];
+                o[0] = static_cast<uint8_t>(225 * k);  // B, G, R: warm white
+                o[1] = static_cast<uint8_t>(238 * k);
+                o[2] = static_cast<uint8_t>(245 * k);
+                o[3] = static_cast<uint8_t>(255 * a);
+            }
+        }
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = t.w;
+        td.Height = t.h;
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_IMMUTABLE;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA init = {rgba.data(), static_cast<UINT>(t.w * 4), 0};
+        ok = SUCCEEDED(g_dev->CreateTexture2D(&td, &init, &t.tex)) &&
+             SUCCEEDED(g_dev->CreateShaderResourceView(t.tex, nullptr, &t.srv));
+        SelectObject(dc, oldBmp);
+    }
+    SelectObject(dc, oldFont);
+    if (bmp) DeleteObject(bmp);
+    DeleteObject(font);
+    DeleteDC(dc);
+    return ok;
+}
+
+template <class T>
+bool ReadSeqlocked(const T* view, T* out) {
+    for (int i = 0; i < 4; ++i) {
+        const uint32_t s0 = view->seq;
+        if (s0 & 1) continue;
+        memcpy(out, const_cast<const T*>(view), sizeof(T));
+        if (view->seq == s0) return true;
+    }
+    return false;
+}
+
+template <class T>
+const T* OpenView(const wchar_t* name, const T*& view, ULONGLONG& lastTry) {
+    if (view) return view;
+    const ULONGLONG now = GetTickCount64();
+    if (now - lastTry < 1000) return nullptr;
+    lastTry = now;
+    HANDLE h = OpenFileMappingW(FILE_MAP_READ, FALSE, name);
+    if (!h) return nullptr;
+    view = static_cast<const T*>(MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(T)));
+    CloseHandle(h);
+    return view;
+}
+
+struct LabelCb {
+    float rect[4], uv[4], color[4], mode[4], head[4];
+};
+
+// occ: occlusion test on/off, head depth (Skyrim units), head pixel x, y, Skyrim near, far.
+void LabelQuad(ID3D11DeviceContext* ctx, const D3D11_VIEWPORT& vp, float x0, float y0, float x1, float y1,
+               const float* color, float alpha, float mode, ID3D11ShaderResourceView* srv, const float* occ) {
+    LabelCb c = {{x0 / vp.Width * 2 - 1, 1 - y0 / vp.Height * 2, x1 / vp.Width * 2 - 1, 1 - y1 / vp.Height * 2},
+                 {0, 0, 1, 1},
+                 {color[0], color[1], color[2], alpha},
+                 {mode, occ[0], occ[1], 0},
+                 {occ[2], occ[3], occ[4], occ[5]}};
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (FAILED(ctx->Map(g_labelCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) return;
+    memcpy(m.pData, &c, sizeof(c));
+    ctx->Unmap(g_labelCb, 0);
+    ID3D11ShaderResourceView* srvs[3] = {srv, nullptr, g_depthSrv};
+    ctx->PSSetShaderResources(0, 3, srvs);
+    ctx->Draw(4, 0);
+}
+
+const bridge::State* g_stateView = nullptr;
+const bridge::CameraCmd* g_camView = nullptr;
+const bridge::Names* g_namesView = nullptr;
+ULONGLONG g_stateTry = 0, g_camTry = 0, g_namesTry = 0;
+bool g_labelsLogged = false;
+
+// Draws the labels onto rtv. `now` is Skyrim's current camera (SkyPose layout). The
+// pawns' DD positions reach Skyrim through the last camera command: its DD camera
+// position is the Skyrim camera it was made from (skyPose), and DD (x, y, z) is Skyrim
+// (x, -z, y) times kDdToSkyrim.
+void DrawLabels(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, const float* now,
+                bool depth, const float* nearFar) {
+    bridge::State st;
+    bridge::CameraCmd cmd;
+    if (!OpenView(bridge::kMappingName, g_stateView, g_stateTry) ||
+        !OpenView(bridge::kCamMappingName, g_camView, g_camTry) || !ReadSeqlocked(g_stateView, &st) ||
+        !ReadSeqlocked(g_camView, &cmd) || st.magic != bridge::kMagic || !st.tile ||
+        !(cmd.flags & bridge::kCamOverride) || !(cmd.flags & bridge::kGlobalCoords) || !InitLabels())
+        return;
+    bridge::Names names = {};
+    if (OpenView(bridge::kNamesMappingName, g_namesView, g_namesTry)) ReadSeqlocked(g_namesView, &names);
+    const float scale = vp.Height / 1080.0f;
+    const int px = static_cast<int>(std::lround(kLabelFontPx * scale));
+    const float tileX = (static_cast<float>(st.tile & 0xFFFF) - 50.0f) * 10000.0f;
+    const float tileZ = (static_cast<float>(st.tile >> 16) - 50.0f) * 10000.0f;
+    const float* r = now + 3;
+    const float right[3] = {r[0], r[3], r[6]}, fwd[3] = {r[1], r[4], r[7]}, up[3] = {r[2], r[5], r[8]};
+
+    // Save what we change (as Draw does).
+    ID3D11RenderTargetView* oldRtv = nullptr;
+    ID3D11DepthStencilView* oldDsv = nullptr;
+    ctx->OMGetRenderTargets(1, &oldRtv, &oldDsv);
+    ID3D11BlendState* oldBlend = nullptr;
+    FLOAT oldFactor[4];
+    UINT oldMask;
+    ctx->OMGetBlendState(&oldBlend, oldFactor, &oldMask);
+    ID3D11DepthStencilState* oldDs = nullptr;
+    UINT oldRef;
+    ctx->OMGetDepthStencilState(&oldDs, &oldRef);
+    ID3D11RasterizerState* oldRs = nullptr;
+    ctx->RSGetState(&oldRs);
+    UINT oldVpCount = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+    D3D11_VIEWPORT oldVp[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+    ctx->RSGetViewports(&oldVpCount, oldVp);
+    D3D11_PRIMITIVE_TOPOLOGY oldTopo;
+    ctx->IAGetPrimitiveTopology(&oldTopo);
+    ID3D11InputLayout* oldLayout = nullptr;
+    ctx->IAGetInputLayout(&oldLayout);
+    ID3D11VertexShader* oldVs = nullptr;
+    ctx->VSGetShader(&oldVs, nullptr, nullptr);
+    ID3D11PixelShader* oldPs = nullptr;
+    ctx->PSGetShader(&oldPs, nullptr, nullptr);
+    ID3D11ShaderResourceView* oldSrv[3] = {};
+    ctx->PSGetShaderResources(0, 3, oldSrv);
+    ID3D11Buffer *oldCb = nullptr, *oldVsCb = nullptr;
+    ctx->PSGetConstantBuffers(0, 1, &oldCb);
+    ctx->VSGetConstantBuffers(0, 1, &oldVsCb);
+    ID3D11SamplerState* oldSampler = nullptr;
+    ctx->PSGetSamplers(0, 1, &oldSampler);
+
+    ctx->OMSetRenderTargets(1, &rtv, nullptr);
+    ctx->OMSetDepthStencilState(g_noDepth, 0);
+    ctx->OMSetBlendState(g_blend, nullptr, 0xFFFFFFFF);
+    ctx->RSSetState(g_raster);
+    ctx->RSSetViewports(1, &vp);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    ctx->IASetInputLayout(nullptr);
+    ctx->VSSetShader(g_vsLabel, nullptr, 0);
+    ctx->PSSetShader(g_psLabel, nullptr, 0);
+    ctx->VSSetConstantBuffers(0, 1, &g_labelCb);
+    ctx->PSSetConstantBuffers(0, 1, &g_labelCb);
+    ctx->PSSetSamplers(0, 1, &g_sampler);
+
+    int drawn = 0;
+    for (int role = bridge::kMainPawn; role < static_cast<int>(bridge::kRoleCount); ++role) {
+        const bridge::Actor& a = st.actors[role];
+        if (!(a.flags & bridge::kActorPresent)) continue;
+        const float d[3] = {a.pos[0] + tileX - cmd.pos[0], a.pos[1] + kLabelHeadDd - cmd.pos[1],
+                            a.pos[2] + tileZ - cmd.pos[2]};
+        const float p[3] = {cmd.skyPose[0] + d[0] * kDdToSkyrim, cmd.skyPose[1] - d[2] * kDdToSkyrim,
+                            cmd.skyPose[2] + d[1] * kDdToSkyrim};
+        const float v[3] = {p[0] - now[0], p[1] - now[1], p[2] - now[2]};
+        const float z = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
+        if (z < 30.0f || z > kLabelFadeEnd) continue;
+        const float x = (v[0] * right[0] + v[1] * right[1] + v[2] * right[2]) / z;
+        const float y = (v[0] * up[0] + v[1] * up[1] + v[2] * up[2]) / z;
+        const float sx = (x - now[12]) / (now[13] - now[12]) * vp.Width;
+        const float sy = (now[14] - y) / (now[14] - now[15]) * vp.Height;
+        if (sx < -vp.Width * 0.2f || sx > vp.Width * 1.2f || sy < -vp.Height * 0.2f || sy > vp.Height * 1.2f) continue;
+        const float alpha =
+            z <= kLabelFadeStart ? 1.0f : 1.0f - (z - kLabelFadeStart) / (kLabelFadeEnd - kLabelFadeStart);
+        // Hidden behind Skyrim's walls: Skyrim's depth at the point above the head (the
+        // pawn itself is DDDA's, not in that buffer).
+        const float occ[6] = {depth ? 1.0f : 0.0f, z, (std::max)(0.0f, (std::min)(vp.Width - 1, sx)),
+                              (std::max)(0.0f, (std::min)(vp.Height - 1, sy)), nearFar[0], nearFar[1]};
+
+        const float barW = kLabelBarW * scale, barH = (std::max)(2.0f, kLabelBarH * scale);
+        const float dot = kLabelDot * scale, gap = 6 * scale;
+        const float left = sx - (dot + gap + barW) / 2;
+        const float barX = left + dot + gap, barY = sy - barH;
+        // Bar: green for current health, grey for the rest up to the maximum.
+        const float hp = (a.flags & bridge::kActorHpValid) && a.hpMax > 0
+                             ? (std::max)(0.0f, (std::min)(1.0f, a.hp / a.hpMax))
+                             : 1.0f;
+        const float green[3] = {0.66f, 0.84f, 0.18f}, grey[3] = {0.55f, 0.55f, 0.55f}, shade[3] = {0, 0, 0};
+        LabelQuad(ctx, vp, barX - 1, barY - 1, barX + barW + 1, barY + barH + 1, shade, alpha * 0.45f, 0, nullptr, occ);
+        LabelQuad(ctx, vp, barX + barW * hp, barY, barX + barW, barY + barH, grey, alpha * 0.85f, 0, nullptr, occ);
+        if (hp > 0) LabelQuad(ctx, vp, barX, barY, barX + barW * hp, barY + barH, green, alpha, 0, nullptr, occ);
+        const float cy = barY + barH / 2;
+        LabelQuad(ctx, vp, left, cy - dot / 2, left + dot, cy + dot / 2, kLabelDotColor[role], alpha, 2, nullptr, occ);
+        // Name, left-aligned with the bar, just above it.
+        names.name[role][bridge::kNameBytes - 1] = 0;
+        const std::string name = names.magic == bridge::kNamesMagic ? names.name[role] : "";
+        NameTex& t = g_nameTex[role];
+        if (!name.empty() && (t.name != name || t.px != px || !t.srv)) MakeNameTex(t, name, px);
+        if (!name.empty() && t.srv) {
+            const float nx = barX - t.pad, ny = barY - t.h + t.pad * 0.6f;
+            const float white[3] = {1, 1, 1};
+            LabelQuad(ctx, vp, nx, ny, nx + t.w, ny + t.h, white, alpha, 1, t.srv, occ);
+        }
+        ++drawn;
+    }
+    if (drawn && !g_labelsLogged) {
+        g_labelsLogged = true;
+        Log(reshade::log::level::info, "DDDABridge: pawn labels shown (%d)", drawn);
+    }
+
+    ctx->OMSetRenderTargets(1, &oldRtv, oldDsv);
+    ctx->OMSetBlendState(oldBlend, oldFactor, oldMask);
+    ctx->OMSetDepthStencilState(oldDs, oldRef);
+    ctx->RSSetState(oldRs);
+    ctx->RSSetViewports(oldVpCount, oldVp);
+    ctx->IASetPrimitiveTopology(oldTopo);
+    ctx->IASetInputLayout(oldLayout);
+    ctx->VSSetShader(oldVs, nullptr, 0);
+    ctx->PSSetShader(oldPs, nullptr, 0);
+    ctx->PSSetShaderResources(0, 3, oldSrv);
+    ctx->PSSetConstantBuffers(0, 1, &oldCb);
+    ctx->VSSetConstantBuffers(0, 1, &oldVsCb);
+    ctx->PSSetSamplers(0, 1, &oldSampler);
+    SafeRelease(oldRtv);
+    SafeRelease(oldDsv);
+    SafeRelease(oldBlend);
+    SafeRelease(oldDs);
+    SafeRelease(oldRs);
+    SafeRelease(oldLayout);
+    SafeRelease(oldVs);
+    SafeRelease(oldPs);
+    for (auto*& v : oldSrv) SafeRelease(v);
+    SafeRelease(oldCb);
+    SafeRelease(oldVsCb);
+    SafeRelease(oldSampler);
+}
+
 // Draws the party onto `backBuffer` through the immediate context of `cmd`.
 bool CompositeParty(command_list* cmd, resource backBuffer) {
     device* dev = cmd->get_device();
@@ -884,6 +1270,7 @@ bool CompositeParty(command_list* cmd, resource backBuffer) {
     ctx->Unmap(g_params, 0);
     D3D11_VIEWPORT vp = {0, 0, bw, bh, 0, 1};
     Draw(ctx, rtv, vp, warp && !g_debugOldWarp);
+    if (warp) DrawLabels(ctx, rtv, vp, now, depth && !g_debugNoDepth, nearFar);
     if (++g_shown == 1) Log(reshade::log::level::info, "DDDABridge: first DD frame shown in Skyrim");
     return true;
 }

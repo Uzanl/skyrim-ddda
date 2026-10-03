@@ -69,6 +69,7 @@ constexpr uintptr_t kPos = 0x40;
 constexpr uintptr_t kStatus = 0x4BC;
 constexpr uintptr_t kHp = 0x1D8;  // HP max follows at +4
 constexpr uintptr_t kRecord = 0x3DEC;
+constexpr uintptr_t kRecordName = 0x70C;  // UTF-8, in the save-data record
 // pawn record = Arisen record + kFirstPawnRecord + kPawnRecordSize * slot
 constexpr uintptr_t kFirstPawnRecord = 0x7F0;
 constexpr uintptr_t kPawnRecordSize = 0x1660;
@@ -184,6 +185,7 @@ struct Captured {
     LONGLONG qpc;
     float pos[3];
     float hp, hpMax;
+    char name[bridge::kNameBytes];  // as DDDA shows it above the head; "" unknown
 };
 SRWLOCK g_lock = SRWLOCK_INIT;
 Captured g_captured[bridge::kRoleCount];
@@ -265,6 +267,12 @@ void Capture(void* obj, bool isPlayer) {
     uint32_t status;
     float hp[2] = {};
     bool hpValid = ReadU32(self + kStatus, &status) && ReadFloats(status + kHp, hp, 2) && SaneHp(hp);
+    char name[bridge::kNameBytes] = {};
+    uint32_t record;
+    if (role != bridge::kArisen && ReadU32(self + kRecord, &record)) {
+        const auto* src = reinterpret_cast<const volatile char*>(record + kRecordName);
+        for (uint32_t i = 0; i + 1 < bridge::kNameBytes && src[i]; ++i) name[i] = src[i];
+    }
     LARGE_INTEGER q;
     QueryPerformanceCounter(&q);
 
@@ -275,6 +283,7 @@ void Capture(void* obj, bool isPlayer) {
     c.pos[0] = pos[0];
     c.pos[1] = pos[1];
     c.pos[2] = pos[2];
+    memcpy(c.name, name, sizeof(name));
     c.hpValid = hpValid;
     if (hpValid) {
         c.hp = hp[0];
@@ -1666,6 +1675,36 @@ bool OpenMapping() {
     return true;
 }
 
+// The pawns' names for the Skyrim add-on's labels (bridge_shared.h, Names).
+bridge::Names* g_names = nullptr;
+
+void OpenNamesMapping() {
+    HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(bridge::Names),
+                                  bridge::kNamesMappingName);
+    void* view = h ? MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(bridge::Names)) : nullptr;
+    if (!view) {
+        Log("names mapping failed: %lu", GetLastError());
+        if (h) CloseHandle(h);
+        return;
+    }
+    g_names = static_cast<bridge::Names*>(view);  // the handle stays open, as for the State
+    g_names->magic = bridge::kNamesMagic;
+    g_names->version = bridge::kNamesVersion;
+}
+
+void PublishNames(const Captured* snap) {
+    if (!g_names) return;
+    bool same = true;
+    for (uint32_t r = 0; r < bridge::kRoleCount; ++r)
+        if (snap[r].seen && strncmp(g_names->name[r], snap[r].name, bridge::kNameBytes) != 0) same = false;
+    if (same) return;
+    InterlockedIncrement(reinterpret_cast<volatile LONG*>(&g_names->seq));  // odd: writing
+    for (uint32_t r = 0; r < bridge::kRoleCount; ++r)
+        if (snap[r].seen) memcpy(g_names->name[r], snap[r].name, bridge::kNameBytes);
+    InterlockedIncrement(reinterpret_cast<volatile LONG*>(&g_names->seq));  // even: done
+    Log("names: main pawn \"%s\", hired \"%s\", \"%s\"", g_names->name[1], g_names->name[2], g_names->name[3]);
+}
+
 // --- Camera commands ---------------------------------------------------------
 bridge::CameraCmd* g_camCmd = nullptr;
 
@@ -1877,6 +1916,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
     relight::Init(&Log, g_base);
     relight::Install();
     OpenCameraMapping();
+    OpenNamesMapping();
     OpenGroundMapping();
     OpenShiftMapping();
     bool camActive = false;
@@ -1903,6 +1943,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
         Publish(hooks, snap, now.QuadPart);
+        PublishNames(snap);
         if (PollCameraCmd() != camActive) {
             camActive = !camActive;
             camOffSince = GetTickCount64();
