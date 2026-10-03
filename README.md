@@ -49,6 +49,11 @@ Skyrim shows the result. The two processes talk through shared memory
 - **Stairs and the dense graph: work** (earlier today). Ramps are continuous cones from
   flat built floors; they cost 9-42k triangles per Riverwood tile. A large city and steep
   stone stairs are not tested.
+- Seen 2026-10-03, not investigated (parked by the user): the Dragonborn (Redguard, scale
+  1.0, nominally ~183 cm) looks about 10 cm taller than Mariana (183 cm in DDDA). Suspects:
+  Skyrim's real model height, DDDA's unit not being exactly 1 cm, the camera's FOV. The fix
+  would be the world scale (`K`, 70 Skyrim units per metre), not the pawn image; first
+  measure it with both standing side by side.
 - Decided 2026-10-03: navigation stays DDDA's own. Letting Skyrim's navmesh lead the
   pawns was considered and dropped.
 
