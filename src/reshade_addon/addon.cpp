@@ -893,9 +893,12 @@ void Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D11_VIE
 // filtered out of the frames (isolate), so the labels are drawn here, at Skyrim's
 // resolution, from the bridge State (positions, health) and Names (DDDA bridge).
 // Screen sizes follow DDDA's at 1080p and scale with the back buffer's height.
-// The bar's bottom is kLabelHeadDd x the pawn's height scale (bridge Actor.heightScale,
-// the editor's body height; 0.74-1.05 in the user's party) above its feet.
-constexpr float kLabelHeadDd = 190.0f;      // DD cm at scale 1 (just over a standard head)
+// The bar's bottom is the same gap above every pawn's head: the head top is
+// kLabelHeadTopDd x the pawn's height scale (bridge Actor.heightScale, the editor's body
+// height; 0.74-1.05 in the user's party). 185 from Jack (0.74): a bar at 190 x 0.74 = 141
+// cm touched his head (2026-10-03).
+constexpr float kLabelHeadTopDd = 185.0f;   // DD cm, head top at scale 1
+constexpr float kLabelGapDd = 15.0f;        // DD cm between the head and the bar
 constexpr float kLabelFadeStart = 1750.0f;  // Skyrim units (25 m): labels fade out...
 constexpr float kLabelFadeEnd = 2450.0f;    // ...until 35 m
 constexpr float kLabelFontPx = 30.0f;       // at 1080 lines
@@ -1154,7 +1157,7 @@ void DrawLabels(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D
     for (int role = bridge::kMainPawn; role < static_cast<int>(bridge::kRoleCount); ++role) {
         const bridge::Actor& a = st.actors[role];
         if (!(a.flags & bridge::kActorPresent)) continue;
-        const float d[3] = {a.pos[0] + tileX - cmd.pos[0], a.pos[1] + kLabelHeadDd * (a.heightScale > 0 ? a.heightScale : 1.0f) - cmd.pos[1],
+        const float d[3] = {a.pos[0] + tileX - cmd.pos[0], a.pos[1] + kLabelHeadTopDd * (a.heightScale > 0 ? a.heightScale : 1.0f) + kLabelGapDd - cmd.pos[1],
                             a.pos[2] + tileZ - cmd.pos[2]};
         const float p[3] = {cmd.skyPose[0] + d[0] * kDdToSkyrim, cmd.skyPose[1] - d[2] * kDdToSkyrim,
                             cmd.skyPose[2] + d[1] * kDdToSkyrim};
