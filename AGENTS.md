@@ -38,9 +38,22 @@ binaries, `backups/`, `staged/`, logs, or local session state (`stream_config.js
 ## Practical rules learned the hard way
 
 - Reply to the user in Brazilian Portuguese.
-- DLLs that a running game holds cannot be replaced. Build, copy to `staged/`, and let a
-  watcher install them when the game exits. Back up the installed version first, under
-  `backups/<name>/`.
+- DLLs that a running game holds cannot be replaced. Build, back up the installed version
+  under `backups/<name>/`, copy the new one to `staged/`, then start a watcher as a
+  **background** PowerShell command (it waits for the game to exit, installs and checks
+  the hash). Tell the user to close the game, and report when the watcher's notification
+  says the file is installed.
+  ```powershell
+  # DDDA: build\x86\dinput8.dll next to DDDA.exe
+  while (Get-Process DDDA -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }; Start-Sleep 2
+  Copy-Item "<repo>\staged\dinput8.dll" "E:\SteamLibrary\steamapps\common\DDDA\dinput8.dll" -Force
+  (Get-FileHash "E:\SteamLibrary\steamapps\common\DDDA\dinput8.dll").Hash -eq (Get-FileHash "<repo>\build\x86\dinput8.dll").Hash
+  ```
+  For Skyrim, wait on `SkyrimSE` and copy `build\x64\DDDABridge.dll` and
+  `build\skse\DDDAGhosts.dll` to `...\Skyrim Special Edition\Data\SKSE\Plugins\`, and
+  `build\x64\DDDABridge.addon64` next to `SkyrimSE.exe`. If the game is not running, copy
+  right away. Extra steps that need the game closed can go in the same watcher (for
+  example deleting `stream_state.json` or editing `ddda_experiment.txt`).
 - Changing the waypoint graph layout (`NODES`, `NODE_STEP` in `tools/terrain/stream.py`)
   requires deleting `stream_state.json` and regenerating with **DDDA closed**. Otherwise
   new and old graphs link to the wrong nodes.
