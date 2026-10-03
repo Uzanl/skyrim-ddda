@@ -66,5 +66,13 @@ binaries, `backups/`, `staged/`, logs, or local session state (`stream_config.js
   reload in DDDA.
 - The streamer starts with DDDA (`ddda_streamer.txt` next to `DDDA.exe`), runs as a single
   instance and logs to `tools/terrain/stream.log`.
+- **Never change DDDA's files for good.** Nothing in DDDA's folder (`nativePC`, archives,
+  `DDDA.exe`) may be written, replaced or deleted, not even with a backup. Plain DDDA
+  started from Steam must stay the unmodified game. Generated or patched files go into
+  the overlay (`tools/terrain/overlay.py`), which the DLL reads only in a bridge session
+  (`play_bridge.bat`); session-only behaviour (streamer, "hold", hooks that change the
+  world) is gated on that session too. Only our own files may sit next to `DDDA.exe`
+  (`dinput8.dll`, `ddda_*.txt`, logs). (2026-10-03: the streamer had rewritten 204
+  tiles and left "hold" on, so pawns stopped following in the plain game.)
 - Never write game memory without guards (vtable check, plausible values). Both games run
   while we work.
