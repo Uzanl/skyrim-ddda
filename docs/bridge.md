@@ -240,7 +240,7 @@ a DDDA screenshot: Palatino Linotype rendered with GDI into a texture (warm whit
 soft shadow), a thin yellow-green bar with grey for the missing health, a dot in the
 party slot's colour (main pawn red, first hired yellow, second blue). Fixed screen size
 (scaled from 1080p), the bar's bottom 190 DD cm above the feet (215 until the user asked
-for it nearer the head; bar 150 x 9 px at 1080p, was 230 x 6); fades out from 25 to 35 m and is
+for it nearer the head; bar 150 x 7 px at 1080p, was 230 x 6, then 150 x 9: "too thick"); fades out from 25 to 35 m and is
 hidden when Skyrim's depth at the head is nearer than the head (a wall in between).
 
 ### Depth test (step 2c)

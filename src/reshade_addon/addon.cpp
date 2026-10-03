@@ -897,7 +897,7 @@ constexpr float kLabelHeadDd = 190.0f;      // DD cm above the feet (bar bottom,
 constexpr float kLabelFadeStart = 1750.0f;  // Skyrim units (25 m): labels fade out...
 constexpr float kLabelFadeEnd = 2450.0f;    // ...until 35 m
 constexpr float kLabelFontPx = 30.0f;       // at 1080 lines
-constexpr float kLabelBarW = 150.0f, kLabelBarH = 9.0f, kLabelDot = 16.0f;
+constexpr float kLabelBarW = 150.0f, kLabelBarH = 7.0f, kLabelDot = 16.0f;
 const float kLabelDotColor[bridge::kRoleCount][3] = {
     {1, 1, 1}, {0.86f, 0.16f, 0.16f}, {0.92f, 0.78f, 0.15f}, {0.22f, 0.32f, 0.95f}};
 
