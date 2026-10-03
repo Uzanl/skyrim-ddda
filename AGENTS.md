@@ -38,6 +38,11 @@ binaries, `backups/`, `staged/`, logs, or local session state (`stream_config.js
 ## Practical rules learned the hard way
 
 - Reply to the user in Brazilian Portuguese.
+- **Read the docs before reverse engineering.** Before scanning a game's memory, tracing
+  frames or writing a recon script, search `docs/` (above all `ddda-memory.md`) and
+  `tools/recon/README.md` for what you need: addresses, offsets, classes and formats
+  found earlier are written there. (2026-10-03: a script to find the pawns' names was
+  written although `ddda-memory.md` already had them: `[char+0x3DEC]+0x70C`.)
 - DLLs that a running game holds cannot be replaced. Build, back up the installed version
   under `backups/<name>/`, copy the new one to `staged/`, then start a watcher as a
   **background** PowerShell command (it waits for the game to exit, installs and checks
