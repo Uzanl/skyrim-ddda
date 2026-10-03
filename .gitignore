@@ -1,0 +1,35 @@
+build/
+tools/recon/_data/
+__pycache__/
+# Third-party downloads (SKSE, Address Library, ...) are not ours to redistribute
+*.7z
+*.zip
+
+# Game data and anything extracted or generated from it (never in the repo)
+backups/
+staged/
+tools/terrain/out/
+tools/terrain/out_*/
+*.arc
+*.npz
+*.bsa
+*.esm
+*.esp
+*.nif
+
+# Build leftovers and binaries
+*.obj
+*.dll
+*.exe
+*.lib
+*.exp
+*.pdb
+*.addon64
+
+# Local state and logs of a play session
+*.log
+tools/terrain/stream_config.json
+tools/terrain/stream_state.json
+tools/terrain/tracker_state.json
+tools/terrain/_*.arc
+.claude/settings.local.json
