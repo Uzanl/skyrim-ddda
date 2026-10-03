@@ -38,7 +38,7 @@ struct Actor {
     float pos[3];          // body position, DD world units (Y up, ~cm)
     float hp;
     float hpMax;
-    uint32_t reserved;
+    float heightScale;     // body height scale (char+0x64, 1 = standard body); 0 = unknown
 };
 
 // Seqlock: the writer makes `seq` odd while writing and even when done.

@@ -67,6 +67,7 @@ constexpr int kPartsMaskWords = 16;
 
 // Character fields.
 constexpr uintptr_t kPos = 0x40;
+constexpr uintptr_t kScaleY = 0x64;  // uCoord scale (+0x60 x, y, z): the body's height scale from the editor
 constexpr uintptr_t kStatus = 0x4BC;
 constexpr uintptr_t kHp = 0x1D8;  // HP max follows at +4
 constexpr uintptr_t kRecord = 0x3DEC;
@@ -194,6 +195,7 @@ struct Captured {
     LONGLONG qpc;
     float pos[3];
     float hp, hpMax;
+    float heightScale;  // 0 unknown
     char name[bridge::kNameBytes];  // as DDDA shows it above the head; "" unknown
 };
 SRWLOCK g_lock = SRWLOCK_INIT;
@@ -276,6 +278,8 @@ void Capture(void* obj, bool isPlayer) {
     uint32_t status;
     float hp[2] = {};
     bool hpValid = ReadU32(self + kStatus, &status) && ReadFloats(status + kHp, hp, 2) && SaneHp(hp);
+    float scale = 0;
+    if (!ReadFloats(self + kScaleY, &scale, 1) || !(scale > 0.3f && scale < 2.0f)) scale = 0;
     char name[bridge::kNameBytes] = {};
     uint32_t record;
     if (role != bridge::kArisen && ReadU32(self + kRecord, &record)) {
@@ -293,6 +297,7 @@ void Capture(void* obj, bool isPlayer) {
     c.pos[1] = pos[1];
     c.pos[2] = pos[2];
     memcpy(c.name, name, sizeof(name));
+    c.heightScale = scale;
     c.hpValid = hpValid;
     if (hpValid) {
         c.hp = hp[0];
@@ -1908,6 +1913,7 @@ void Publish(bool hooks, const Captured* snap, LONGLONG now) {
         a.pos[2] = c.pos[2];
         a.hp = c.hp;
         a.hpMax = c.hpMax;
+        a.heightScale = c.heightScale;
     }
     s->qpcTime = static_cast<uint64_t>(now);
     s->updates++;

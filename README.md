@@ -27,7 +27,7 @@ Skyrim shows the result. The two processes talk through shared memory
 | Streamer starts and stops with DDDA (no terminal) | done, verified |
 | Bridge session only (`play_bridge.bat`): DDDA from Steam stays the plain game; generated tiles in an overlay, the game's files never written | overlay verified in game 2026-10-03 (log: session started, 59 tiles read from the overlay around a link); plain start from Steam not checked in game yet |
 | Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
-| Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou"); bar lowered, narrower and thicker the same day: built and installed, not seen in game |
+| Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou"); bar lowered, narrower, 7 px thick, at each pawn's own height (`char+0x64` scale) the same day: built, installs when the games close, not seen in game |
 | Pawns fall into the void when the save is away from the link spot | open bug, reported 2026-10-03; analysis in docs/party-in-terrain-mode.md |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |

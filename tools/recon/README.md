@@ -28,6 +28,7 @@ drain events). An earlier detach without that crashed the game once.
 | `campos.py SECS PLAYER` | Camera chain vs body position (proved the old "position" chain is the camera) |
 | `charlayout.py CHAR=label...` | Status pointers and position-like fields inside character objects |
 | `names.py PAWN=Name...` | How pawn objects reach their name/save record (`+0x3DEC`, name at `+0x70C`) |
+| `pawnheight.py` | Party members' body height: scale floats in the character objects and record fields that differ (found `char+0x64`) |
 | `pawndiff.py MAINMAX` | Field diff main vs hired pawn (found nothing inside the object; kept for reference) |
 | `camscan.py` | Every copy of the camera position, with the owning object (found the `uCameraCtrl`) |
 | `propoff.py NAME...` / `proplist.py START END` | MtDTI property registrations: field offsets by property name |
