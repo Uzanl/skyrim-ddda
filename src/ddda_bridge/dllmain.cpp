@@ -67,7 +67,13 @@ constexpr int kPartsMaskWords = 16;
 
 // Character fields.
 constexpr uintptr_t kPos = 0x40;
-constexpr uintptr_t kScaleY = 0x64;  // uCoord scale (+0x60 x, y, z): the body's height scale from the editor
+// Skeleton (docs/ddda-memory.md, "Skeleton"): [char+0x364] is the joint array (object
+// vtable 0x143A8E8), joint k at +k*0x140 with its world position at +0x40; the joint
+// count is the low byte of char+0x378 (68 and 65 in the user's party).
+constexpr uintptr_t kJoints = 0x364, kJointCount = 0x378;
+constexpr uintptr_t kJointArrayVtable = 0x103A8E8;  // + base
+constexpr uintptr_t kJointStride = 0x140, kJointPos = 0x40;
+constexpr float kHeadAxis = 40.0f;  // cm: joints farther than this from the feet's axis (weapons) are not the head
 constexpr uintptr_t kStatus = 0x4BC;
 constexpr uintptr_t kHp = 0x1D8;  // HP max follows at +4
 constexpr uintptr_t kRecord = 0x3DEC;
@@ -195,7 +201,7 @@ struct Captured {
     LONGLONG qpc;
     float pos[3];
     float hp, hpMax;
-    float heightScale;  // 0 unknown
+    float headHeight;  // 0 unknown
     char name[bridge::kNameBytes];  // as DDDA shows it above the head; "" unknown
 };
 SRWLOCK g_lock = SRWLOCK_INIT;
@@ -236,6 +242,26 @@ bool ReadFloats(uintptr_t addr, float* out, int n) {
         return false;
     }
 }
+// The highest joint near the body's axis, above the feet (pos): the top of the head in
+// this frame's pose, so it follows the editor's height and posture, crouching and
+// leaning. 0 when the skeleton cannot be read.
+float HeadHeight(uintptr_t self, const float* pos) {
+    uint32_t joints, count;
+    uint32_t vt;
+    if (!ReadU32(self + kJoints, &joints) || !ReadU32(self + kJointCount, &count) || !ReadU32(joints, &vt) ||
+        vt != g_base + kJointArrayVtable)
+        return 0;
+    count &= 0xFF;
+    float top = 0;
+    for (uint32_t k = 0; k < count; ++k) {
+        float j[3];
+        if (!ReadFloats(joints + k * kJointStride + kJointPos, j, 3)) return 0;
+        float dx = j[0] - pos[0], dz = j[2] - pos[2], dy = j[1] - pos[1];
+        if (dx * dx + dz * dz < kHeadAxis * kHeadAxis && dy > top && dy < 300.0f) top = dy;
+    }
+    return top;
+}
+
 
 bool SanePos(const float* p) {
     for (int i = 0; i < 3; ++i)
@@ -278,8 +304,7 @@ void Capture(void* obj, bool isPlayer) {
     uint32_t status;
     float hp[2] = {};
     bool hpValid = ReadU32(self + kStatus, &status) && ReadFloats(status + kHp, hp, 2) && SaneHp(hp);
-    float scale = 0;
-    if (!ReadFloats(self + kScaleY, &scale, 1) || !(scale > 0.3f && scale < 2.0f)) scale = 0;
+    const float head = HeadHeight(self, pos);
     char name[bridge::kNameBytes] = {};
     uint32_t record;
     if (role != bridge::kArisen && ReadU32(self + kRecord, &record)) {
@@ -297,7 +322,7 @@ void Capture(void* obj, bool isPlayer) {
     c.pos[1] = pos[1];
     c.pos[2] = pos[2];
     memcpy(c.name, name, sizeof(name));
-    c.heightScale = scale;
+    c.headHeight = head;
     c.hpValid = hpValid;
     if (hpValid) {
         c.hp = hp[0];
@@ -1913,7 +1938,7 @@ void Publish(bool hooks, const Captured* snap, LONGLONG now) {
         a.pos[2] = c.pos[2];
         a.hp = c.hp;
         a.hpMax = c.hpMax;
-        a.heightScale = c.heightScale;
+        a.headHeight = c.headHeight;
     }
     s->qpcTime = static_cast<uint64_t>(now);
     s->updates++;

@@ -893,12 +893,12 @@ void Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D11_VIE
 // filtered out of the frames (isolate), so the labels are drawn here, at Skyrim's
 // resolution, from the bridge State (positions, health) and Names (DDDA bridge).
 // Screen sizes follow DDDA's at 1080p and scale with the back buffer's height.
-// The bar's bottom is the same gap above every pawn's head: the head top is
-// kLabelHeadTopDd x the pawn's height scale (bridge Actor.heightScale, the editor's body
-// height; 0.74-1.05 in the user's party). DDDA's editor shows height = 174.7 cm x scale:
-// Mariana, scale 1.0473, is 183 cm in game (the user, 2026-10-03).
-constexpr float kLabelHeadTopDd = 174.7f;   // DD cm, head top at scale 1
-constexpr float kLabelGapDd = 15.0f;        // DD cm between the head and the bar
+// The bar's bottom is the same distance above every pawn's head: kLabelOverHeadDd over
+// its highest head joint this frame (bridge Actor.headHeight, measured by the DDDA bridge
+// from the skeleton, so the editor's height and posture count). The editor's height
+// scale alone put the bar too high on a pawn with a bent posture (2026-10-03).
+constexpr float kLabelOverHeadDd = 24.0f;   // DD cm over the highest head joint (Jack looked right at ~24)
+constexpr float kLabelHeadFallbackDd = 190.0f;  // no skeleton (or an older bridge, which sent a height scale ~1 here)
 constexpr float kLabelFadeStart = 1750.0f;  // Skyrim units (25 m): labels fade out...
 constexpr float kLabelFadeEnd = 2450.0f;    // ...until 35 m
 constexpr float kLabelFontPx = 30.0f;       // at 1080 lines
@@ -1157,7 +1157,7 @@ void DrawLabels(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const D3D
     for (int role = bridge::kMainPawn; role < static_cast<int>(bridge::kRoleCount); ++role) {
         const bridge::Actor& a = st.actors[role];
         if (!(a.flags & bridge::kActorPresent)) continue;
-        const float d[3] = {a.pos[0] + tileX - cmd.pos[0], a.pos[1] + kLabelHeadTopDd * (a.heightScale > 0 ? a.heightScale : 1.0f) + kLabelGapDd - cmd.pos[1],
+        const float d[3] = {a.pos[0] + tileX - cmd.pos[0], a.pos[1] + (a.headHeight > 50.0f ? a.headHeight + kLabelOverHeadDd : kLabelHeadFallbackDd) - cmd.pos[1],
                             a.pos[2] + tileZ - cmd.pos[2]};
         const float p[3] = {cmd.skyPose[0] + d[0] * kDdToSkyrim, cmd.skyPose[1] - d[2] * kDdToSkyrim,
                             cmd.skyPose[2] + d[1] * kDdToSkyrim};

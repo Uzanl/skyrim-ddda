@@ -239,9 +239,10 @@ DD camera position is the Skyrim camera it was made from (`skyPose`). Look copie
 a DDDA screenshot: Palatino Linotype rendered with GDI into a texture (warm white,
 soft shadow), a thin yellow-green bar with grey for the missing health, a dot in the
 party slot's colour (main pawn red, first hired yellow, second blue). Fixed screen size
-(scaled from 1080p), the bar's bottom 15 DD cm above the head for every pawn (head top = 174.7 cm x the pawn's
-height scale, the height DDDA's editor shows: Mariana 1.0473 = 183 cm; 190 x scale put the
-bar on the shortest pawn's head)
+(scaled from 1080p), the bar's bottom 24 DD cm over each pawn's highest head joint
+this frame (`Actor.headHeight`, from the skeleton: height, posture and crouching count; a
+fixed 190 cm, then the editor's height scale, put the bar on the shortest pawn's head or
+too high over a pawn with a bent posture)
 (`Actor.heightScale`, from `char+0x64`; 215 cm for everyone until the user asked for it
 nearer the head, and a short pawn's bar floated far above it; bar 150 x 7 px at 1080p, was 230 x 6, then 150 x 9: "too thick"); fades out from 25 to 35 m and is
 hidden when Skyrim's depth at the head is nearer than the head (a wall in between).

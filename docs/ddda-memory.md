@@ -5,8 +5,16 @@ Steam build 2364871. `DDDA.exe` is 32-bit and loads at 0x400000 with no ASLR.
 **Body height (2026-10-03, tools/recon/pawnheight.py):** characters keep the MT Framework
 uCoord layout: position `+0x40`, rotation `+0x50`, scale `+0x60` (x, y, z). The y scale
 (`+0x64`) is the editor's body height: Jack Shriker 0.74 (visibly the shortest), the Arisen
-0.89, Diana 0.96, Mariana 1.05. Height in DDDA's editor = 174.7 cm x scale (Mariana:
-1.0473, 183 cm in game; one point, to confirm with another pawn). The bridge sends it as `Actor.heightScale` for the labels.
+0.89, Diana 0.96, Mariana 1.05 (183 cm in DDDA's editor). The scale does not give where the
+head is: posture bends the body (Mariana's head is lower than her scale says).
+
+**Skeleton (2026-10-03, tools/recon/headjoint.py):** `[char+0x364]` is the joint array
+(object vtable `0x143A8E8`). Joint k is at `+k*0x140`: world position (vec4, w = 1) at
+`+0x40`, then the bind offset from its parent (hips: 0, 111, 0) and a quaternion. The joint
+count is the low byte of `char+0x378` (also `+0x38C`): 69 Arisen, 68 Mariana and Diana, 65
+Jack. The highest joint within 40 cm of the feet's axis is the head (Arisen 144.5 cm above
+the feet, Mariana 165.6, Diana 160.8, Jack 120.5). The bridge sends it as
+`Actor.headHeight` every frame for the labels.
 
 ## Characters (the Arisen and party pawns)
 
