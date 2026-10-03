@@ -67,6 +67,8 @@ Next, in order:
    going through Skyrim's hit pipeline. Pawn arrows and spells must also be drawn
    (isolate keeps only party meshes).
 4. Shadows, post-processing match, point lights ([docs/lighting.md](docs/lighting.md)).
+5. Performance at full resolution is not measured (each frame copies colour and mask, 2 x
+   8 MB, through the CPU). Options: a 1-byte mask, or reading back only the pawns' rect.
 
 **To play:**
 1. Open DDDA, then Skyrim. The DDDA bridge starts the streamer by itself (hidden,
@@ -77,46 +79,6 @@ Next, in order:
 2. If the graph layout changes (NODES or NODE_STEP), delete
    `tools/terrain/stream_state.json` and regenerate **with DDDA closed**.
 3. A tile DDDA already loaded is read again only after a save reload.
-
-## Where we stopped (2026-10-02)
-
-The pawns follow the player through Skyrim on DDDA's own physics and AI: DDDA's
-open-world tiles are regenerated from Skyrim's terrain around the party (terrain mode +
-streaming, [docs/terrain-proxy.md](docs/terrain-proxy.md)), and the image is reprojected
-to Skyrim's camera ([docs/bridge.md](docs/bridge.md)). While linked the Arisen is
-kinematic (physics off, NOT immortal): see
-[docs/party-in-terrain-mode.md](docs/party-in-terrain-mode.md) for what was changed, how
-to revert it for a playable Arisen, and DDDA's fall-damage rules. Leaps at the edges of
-DDDA's map work (verified in the 2-game test: 3 leaps, pawns kept following, no damage).
-Static objects (houses, fences, rocks, tree trunks) are generated into DDDA's collision
-from the real Skyrim models: built and installed, NOT tested in game yet (the first,
-box-only version was tested: fences stopped the pawns, houses' boxes were too big).
-Open items are listed in [docs/terrain-proxy.md](docs/terrain-proxy.md), "Static
-objects": in-game test, low decks/steps as floors, walkways, a finer waypoint grid.
-To play: start the streamer first (`cd tools/terrain; py -u stream.py run 63 52`); a
-background run here stops after 2 h. Then combat stand-ins.
-Lighting v1 (Skyrim's sun, ambient and fog applied to DDDA's lights while linked) is
-built and installed, NOT tested: [docs/lighting.md](docs/lighting.md) (switches
-`nolight`, `nofog`, `lightscale X`; test without Skyrim: `tools/light_driver.py`).
-Previous binaries in backups/pre_light.
-
-## Where we stopped (2026-10-01, evening)
-
-The pawns render inside Skyrim at full resolution. Open items, in order:
-
-1. ~~2c depth~~ done (G-buffer = packed perspective depth; tested against Skyrim's depth).
-2. **Performance**: not measured at full resolution yet (60 fps at 960x540).
-   Each frame copies 2 x 8 MB (color + mask) through the CPU. Options: 1280x720,
-   a 1-byte mask, or reading back only the rows/rect that contain pawns.
-3. **Ground offset**: pawns stand on DD's ground; in Skyrim they float or sink.
-4. **Effects**: pawn spells and particles are skipped (they come from the shared
-   per-frame vertex buffer, which the filter drops), and so is the HUD.
-5. The ~20 s DDDA freeze while Skyrim loads or closes is still unexplained. It is a
-   different thing from the short pawn hitches of 2026-10-02 (isolate learning cycles,
-   since fixed). It was not seen on 2026-10-02: in the 23:29 session DDDA kept updating
-   the party while Skyrim loaded its save, with no gap in `ddda_bridge.log`. If it comes
-   back, look for a run of 10 s status lines with the party frozen around Skyrim's start
-   or exit.
 
 ## Setup from a fresh clone
 
