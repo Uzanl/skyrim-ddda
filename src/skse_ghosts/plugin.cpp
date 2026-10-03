@@ -6,8 +6,11 @@
 // Skyrim's walkable surface and publishes that height in DDDA units (Ground,
 // bridge_shared.h). The DDDA bridge puts the pawns at that height.
 //
-// Ghosts (milestone G1, currently off): one visible actor per pawn, a clone of the
-// player's base with AI off, teleported every frame.
+// Ghosts (test switch, docs/ghosts.md "Water test"): one actor per pawn, a clone of the
+// player's base with AI off, put every frame where the pawn is (the same DD -> Skyrim
+// mapping as the ReShade add-on's labels: the camera command's DD camera and the Skyrim
+// camera it was made from). Off unless DDDAGhosts_test.txt (next to this DLL) says
+// "visible" or "invisible" (alpha 0).
 //
 // Live collision export (havok_export.h): Skyrim's collision of every loaded exterior cell
 // goes to files that tools/terrain/stream.py turns into DDDA ground.
@@ -25,6 +28,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <thread>
 
 #include "bridge_shared.h"
@@ -33,10 +39,9 @@
 namespace {
 
 constexpr const char* kGhostName = "DDDA Ghost";
-// Spawning is off while the DDDA side is reworked (docs/ghosts.md, "Neutralising
-// DDDA's world"). Visible clones also ended up in autosaves. Cleanup of leftover
-// ghosts on load stays on.
-constexpr bool kSpawnGhosts = false;
+// Ghost mode from DDDAGhosts_test.txt, re-read every second: 0 off, 1 visible, 2 invisible.
+// Clones once ended up in autosaves: they are still deleted before saving and on load.
+std::atomic<int> g_ghostMode{0};
 constexpr std::chrono::milliseconds kUpdatePeriod{16};
 
 void SetupLog() {
@@ -76,6 +81,33 @@ bool Snapshot(const T* src, T* out) {
 }
 
 const bridge::State* g_state = nullptr;
+const bridge::CameraCmd* g_cam = nullptr;
+
+// The pawns' Skyrim feet positions, mapped as the add-on maps its labels: a pawn's global
+// DD position relative to the command's DD camera, scaled, from the Skyrim camera the
+// command was made from. False unless the terrain link is on.
+bool ReadPawns(std::array<RE::NiPoint3, 3>& out, uint32_t& present) {
+    if (!g_state) g_state = OpenView<bridge::State>(bridge::kMappingName);
+    if (!g_cam) g_cam = OpenView<bridge::CameraCmd>(bridge::kCamMappingName);
+    bridge::State st;
+    bridge::CameraCmd cmd;
+    if (!g_state || !g_cam || g_state->magic != bridge::kMagic || g_cam->magic != bridge::kCamMagic ||
+        !Snapshot(g_state, &st) || !Snapshot(g_cam, &cmd) || !st.tile || !(cmd.flags & bridge::kCamOverride) ||
+        !(cmd.flags & bridge::kGlobalCoords))
+        return false;
+    const float tileX = (static_cast<float>(st.tile & 0xFFFF) - 50.0f) * 10000.0f;
+    const float tileZ = (static_cast<float>(st.tile >> 16) - 50.0f) * 10000.0f;
+    present = 0;
+    for (int i = 0; i < 3; ++i) {
+        const bridge::Actor& a = st.actors[bridge::kMainPawn + i];
+        if (!(a.flags & bridge::kActorPresent)) continue;
+        const float d[3] = {a.pos[0] + tileX - cmd.pos[0], a.pos[1] - cmd.pos[1], a.pos[2] + tileZ - cmd.pos[2]};
+        out[i] = {cmd.skyPose[0] + d[0] * bridge::kDDToSkyrim, cmd.skyPose[1] - d[2] * bridge::kDDToSkyrim,
+                  cmd.skyPose[2] + d[1] * bridge::kDDToSkyrim};
+        present |= 1u << i;
+    }
+    return true;
+}
 const bridge::Anchor* g_anchor = nullptr;
 const bridge::Shift* g_shift = nullptr;
 float g_shiftX = 0.0f, g_shiftZ = 0.0f;  // DDDA's treadmill shift, read with the link
@@ -225,6 +257,8 @@ void Skipped(const char* why) {
     }
 }
 
+void UpdateGhosts();
+
 void Update() {
     bridge::State st;
     bridge::Anchor an;
@@ -237,20 +271,24 @@ void Update() {
         lastExport = std::chrono::steady_clock::now();
         havok_export::Update();
     }
-    if (!ReadLink(&st, &an)) {
-        Skipped("no link to DDDA");
-        if (g_ghosts[0] || g_ghosts[1] || g_ghosts[2]) DeleteAllGhosts("link down");
+    if (ReadLink(&st, &an)) PublishGround(st, an);
+    UpdateGhosts();
+}
+
+void UpdateGhosts() {
+    const int mode = g_ghostMode;
+    std::array<RE::NiPoint3, 3> pos;
+    uint32_t present = 0;
+    if (!mode || !ReadPawns(pos, present)) {
+        if (g_ghosts[0] || g_ghosts[1] || g_ghosts[2]) DeleteAllGhosts(mode ? "terrain link down" : "ghosts off");
         return;
     }
-    PublishGround(st, an);
-    if (!kSpawnGhosts) return;
     static auto lastReport = std::chrono::steady_clock::now();
     bool report = std::chrono::steady_clock::now() - lastReport > std::chrono::seconds(2);
     if (report) lastReport = std::chrono::steady_clock::now();
     for (int i = 0; i < 3; ++i) {
-        const bridge::Actor& pawn = st.actors[bridge::kMainPawn + i];
         auto ghost = g_ghosts[i].get();
-        if (!(pawn.flags & bridge::kActorPresent)) {
+        if (!(present & (1u << i))) {
             if (ghost) {
                 DeleteRef(ghost.get());
                 g_ghosts[i].reset();
@@ -264,24 +302,53 @@ void Update() {
             ghost = g_ghosts[i].get();
             if (!ghost) continue;
         }
-        RE::NiPoint3 p = ToSkyrim(pawn.pos, an);
-        p.z = GroundZ(p.x, p.y, RE::PlayerCharacter::GetSingleton()->GetPositionZ());
+        const RE::NiPoint3& p = pos[i];
         ghost->SetPosition(p, true);
+        if (ghost->Is3DLoaded()) ghost->SetAlpha(mode == 2 ? 0.0f : 1.0f);
         if (report) {
             auto now = ghost->GetPosition();
-            spdlog::info("ghost {} {:08X}: target ({:.0f}, {:.0f}, {:.0f}) actual ({:.0f}, {:.0f}, {:.0f}) 3D {} disabled {}",
-                         i, ghost->GetFormID(), p.x, p.y, p.z, now.x, now.y, now.z, ghost->Is3DLoaded(),
-                         ghost->IsDisabled());
+            spdlog::info("ghost {} {:08X} ({}): target ({:.0f}, {:.0f}, {:.0f}) actual ({:.0f}, {:.0f}, {:.0f}) 3D {} "
+                         "in water {}",
+                         i, ghost->GetFormID(), mode == 2 ? "invisible" : "visible", p.x, p.y, p.z, now.x, now.y,
+                         now.z, ghost->Is3DLoaded(), ghost->IsInWater());
         }
     }
+}
+
+// DDDAGhosts_test.txt next to this DLL: "visible" or "invisible" turns the ghosts on.
+void PollGhostMode() {
+    static std::filesystem::path path = [] {
+        wchar_t buf[MAX_PATH];
+        HMODULE self = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&PollGhostMode), &self);
+        GetModuleFileNameW(self, buf, MAX_PATH);
+        return std::filesystem::path(buf).parent_path() / L"DDDAGhosts_test.txt";
+    }();
+    int mode = 0;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"r") == 0 && f) {
+        char line[32] = {};
+        if (fgets(line, sizeof(line), f)) {
+            if (std::strncmp(line, "visible", 7) == 0) mode = 1;
+            if (std::strncmp(line, "invisible", 9) == 0) mode = 2;
+        }
+        fclose(f);
+    }
+    if (mode != g_ghostMode.exchange(mode)) spdlog::info("ghost mode {}", mode == 2 ? "invisible" : mode ? "visible" : "off");
 }
 
 std::atomic<bool> g_updateQueued{false};
 std::atomic<bool> g_gameReady{false};
 
 void UpdateLoop() {
+    auto lastPoll = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     for (;;) {
         std::this_thread::sleep_for(kUpdatePeriod);
+        if (std::chrono::steady_clock::now() - lastPoll >= std::chrono::seconds(1)) {
+            lastPoll = std::chrono::steady_clock::now();
+            PollGhostMode();
+        }
         if (!g_gameReady || g_updateQueued.exchange(true)) continue;
         SKSE::GetTaskInterface()->AddTask([] {
             g_updateQueued = false;  // first: a failing update must not stop the loop

@@ -52,6 +52,22 @@ see the end of this file.)
   down from 150 units above the ghost, with the land height as fallback.
 - Links: DDDABridge.dll publishes `Local\DDDA_SkyrimBridge_anchor_v1` (bridge::Anchor).
 
+## Water test (2026-10-03): built, not tested in game
+
+Question: do ghosts make Skyrim's river react to the pawns (wading ripples, splashes,
+water sounds), and does that still work when they are invisible?
+
+- Switch: `DDDAGhosts_test.txt` next to `DDDAGhosts.dll` (`Data\SKSE\Plugins`), first line
+  `visible` or `invisible`; no file or anything else = off. Re-read every second, so it can
+  be changed while Skyrim runs.
+- Ghosts are placed every frame at the pawns' feet with the add-on's label mapping (the
+  camera command's DD camera and the Skyrim camera it was made from, terrain mode only),
+  not the old anchor mapping. Height: the pawn's own feet (on the river bed under water).
+- Invisible = `Actor::SetAlpha(0)` (not the invisibility effect: enemies would ignore it).
+- `DDDAGhosts.log` prints each ghost every 2 s with `in water` (`TESObjectREFR::IsInWater`).
+- Expected risk: ghosts are teleported each frame (`SetPosition`), so Skyrim may see no
+  movement and make no wading ripples; if so, try moving them with velocity or AI.
+
 ## Neutralising DDDA's world (2026-10-01)
 
 The user asked for the robust route first: falls into DDDA's void, DDDA walls and
