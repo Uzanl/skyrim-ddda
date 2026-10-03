@@ -5,7 +5,7 @@ running as its own process and computes the Arisen, the pawns and combat.
 Skyrim shows the result. The two processes talk through shared memory
 (SkyCraft-style bridge).
 
-## Status (2026-10-01)
+## Status (2026-10-02)
 
 | Step | State |
 |---|---|
@@ -19,8 +19,15 @@ Skyrim shows the result. The two processes talk through shared memory
 | 2a. DDDA frames shown inside Skyrim (ReShade add-on) | done, verified in game (60 fps at 960x540) |
 | 2b. DDDA renders only the party; pawns drawn full screen over Skyrim | done, verified in game (screenshot); full-res capture plus halo fix verified ("resolution improved") |
 | 2c. Depth test against Skyrim (walls in front of pawns) | done, verified in game |
-| 3. Ground: pawns' feet on Skyrim's terrain | not started (pawns float or sink where the two terrains differ) |
-| Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started |
+| Reprojection to Skyrim's current camera (no drag when the camera moves, third person) | done, verified in game |
+| 3. Ground: DDDA's tiles regenerated from Skyrim's terrain around the party (terrain mode + streaming), with leaps at DDDA's map edges | done, verified in game (the party follows through Riverwood and beyond) |
+| Houses, fences, rocks, decks, stairs, bridges: Skyrim's live Havok collision in DDDA's tiles, invisible ramps at lips | done, verified in game ("a colisão funcionou") |
+| Pathfinding on that ground: floors reachable on foot, 2 m waypoint graph centred in narrow passages | built; the stairs improved, the dense graph is not tested yet |
+| Lighting: Skyrim's sun, ambient and fog on DDDA's lights | done, verified in game |
+| Streamer starts and stops with DDDA (no terminal) | done, verified |
+| Interiors | link pauses inside (the party waits outside); pawns inside interiors not started |
+| Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
+| Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
 ## Where we stopped (2026-10-02, night)
 
