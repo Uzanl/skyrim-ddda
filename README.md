@@ -111,7 +111,12 @@ The pawns render inside Skyrim at full resolution. Open items, in order:
 3. **Ground offset**: pawns stand on DD's ground; in Skyrim they float or sink.
 4. **Effects**: pawn spells and particles are skipped (they come from the shared
    per-frame vertex buffer, which the filter drops), and so is the HUD.
-5. The ~20 s DDDA freeze while Skyrim loads or closes is still unexplained.
+5. The ~20 s DDDA freeze while Skyrim loads or closes is still unexplained. It is a
+   different thing from the short pawn hitches of 2026-10-02 (isolate learning cycles,
+   since fixed). It was not seen on 2026-10-02: in the 23:29 session DDDA kept updating
+   the party while Skyrim loaded its save, with no gap in `ddda_bridge.log`. If it comes
+   back, look for a run of 10 s status lines with the party frozen around Skyrim's start
+   or exit.
 
 ## Setup from a fresh clone
 
