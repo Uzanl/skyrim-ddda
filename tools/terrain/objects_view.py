@@ -15,6 +15,7 @@ import numpy as np
 
 
 import objects_test
+import overlay
 import stream
 import arc  # noqa: E402  (tools/recon, put on the path by stream)
 import way
@@ -63,7 +64,7 @@ def main():
 
     for tm in range(m - 1, m + 2):
         for tn in range(n - 1, n + 2):
-            p = stream.way_arc(tm, tn)
+            p = overlay.current(stream.way_arc(tm, tn))
             if not os.path.exists(p):
                 continue
             e = next((e for e in arc.entries(p) if e[1] == stream.WAY_TYPE), None)

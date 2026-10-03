@@ -4,11 +4,10 @@ Rebuilds one st100 tile's character collision ("h" file) from a height grid samp
 from the tile's own terrain, shifted by OFFSET cm, and writes a patched .arc.
 
 Usage: py tile_test.py build COL ROW [OFFSET_CM] [CELL_CM]   -> out/st100_COLmROWn.arc
-       py tile_test.py install COL ROW                        backs up and installs it
-       py tile_test.py restore COL ROW                        puts the original back
+       py tile_test.py install COL ROW                        into the overlay (overlay.py)
+       py tile_test.py restore COL ROW                        removes it from the overlay
 """
 import os
-import shutil
 import sys
 
 import numpy as np
@@ -17,11 +16,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "recon"))
 import arc  # noqa: E402
 import sbc  # noqa: E402
 import sbcgen  # noqa: E402
+import overlay  # noqa: E402
 
 ROM = r"E:\SteamLibrary\steamapps\common\DDDA\nativePC\rom\stage\stage100\split"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "out")
-BACKUP = os.path.join(HERE, "..", "..", "backups", "ddda_arc")
 WATER_FLOOR = 29900.0  # below the sea surface (30013) where the tile has no ground
 
 
@@ -88,19 +87,12 @@ def build(col, row, offset, cell):
 
 def install(col, row):
     src = os.path.join(OUT, os.path.basename(arc_path(col, row)))
-    dst = arc_path(col, row)
-    bak = os.path.join(BACKUP, os.path.basename(dst))
-    os.makedirs(BACKUP, exist_ok=True)
-    if not os.path.exists(bak):
-        shutil.copy2(dst, bak)
-    shutil.copyfile(src, dst)
-    print(f"installed {dst}\nbackup    {bak}")
+    print("installed", overlay.put(arc_path(col, row), open(src, "rb").read()))
 
 
 def restore(col, row):
-    dst = arc_path(col, row)
-    shutil.copy2(os.path.join(BACKUP, os.path.basename(dst)), dst)
-    print(f"restored {dst}")
+    overlay.remove(arc_path(col, row))
+    print(f"removed {col}m{row}n from the overlay")
 
 
 if __name__ == "__main__":

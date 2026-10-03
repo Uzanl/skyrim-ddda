@@ -25,6 +25,7 @@ Skyrim shows the result. The two processes talk through shared memory
 | Pathfinding on that ground: floors reachable on foot, 2 m waypoint graph centred in narrow passages | done, verified in game 2026-10-03 (narrow bridge and a stair in Riverwood; 57-60 fps) |
 | Lighting: Skyrim's sun, ambient and fog on DDDA's lights | done, verified in game |
 | Streamer starts and stops with DDDA (no terminal) | done, verified |
+| Bridge session only (`play_bridge.bat`): DDDA from Steam stays the plain game; generated tiles in an overlay, the game's files never written | built 2026-10-03; overlay and session tested outside the game (test program); not tested in game |
 | Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
 | Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou") |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
@@ -32,6 +33,16 @@ Skyrim shows the result. The two processes talk through shared memory
 
 ## Where we stopped (2026-10-03, evening)
 
+- **The project no longer touches the plain game** (built, not tested in game). The user
+  found pawns that no longer followed in plain DDDA: the streamer had rewritten 204
+  tiles in the game folder (Skyrim's collision and graphs, an invisible "map on top")
+  and left "hold" on (the party's physics asleep while unlinked). All 376 archives were
+  restored (byte-identical to the backups). Now generated tiles go into
+  `tools/terrain/overlay/`, the DLL opens them instead of the game's only in a bridge
+  session (`play_bridge.bat`), and the streamer and "hold" work only in a session.
+  To check in game: `ddda_bridge.log` must show `overlay: CreateFile? opens archives`
+  and `overlay: nativePC\...` lines for generated tiles; DDDA from Steam must log
+  `no bridge session`. [docs/terrain-proxy.md](docs/terrain-proxy.md), "Overlay".
 - **Interiors: the party follows inside** (the user: "funcionou ok", three Riverwood
   houses). DDDAGhosts exports the interior cell's collision; the streamer builds it into
   an "arena" far away in DDDA's map and writes `DDDABridge_interior.ini`; the plugin
@@ -69,13 +80,16 @@ Next, in order:
    8 MB, through the CPU). Options: a 1-byte mask, or reading back only the pawns' rect.
 
 **To play:**
-1. Open DDDA, then Skyrim. The DDDA bridge starts the streamer by itself (hidden,
-   `ddda_streamer.txt` next to DDDA.exe: line 1 the folder, line 2 the command). It is
-   killed when DDDA closes, refuses to run twice, and logs to `tools/terrain/stream.log`.
-   It regenerates tiles when new Skyrim cells are exported. Delete `ddda_streamer.txt`
-   to start it by hand instead (`cd tools/terrain; py -u stream.py run 63 52`).
-2. If the graph layout changes (NODES or NODE_STEP), delete
-   `tools/terrain/stream_state.json` and regenerate **with DDDA closed**.
+1. Start DDDA with `play_bridge.bat` (a bridge session), then Skyrim. DDDA started from
+   Steam is the plain game: no streamer, no generated tiles, no "hold". In a session the
+   bridge starts the streamer by itself (hidden, `ddda_streamer.txt` next to DDDA.exe:
+   line 1 the folder, line 2 the command). It is killed when DDDA closes, refuses to run
+   twice, and logs to `tools/terrain/stream.log`. It regenerates tiles when new Skyrim
+   cells are exported. Delete `ddda_streamer.txt` to start it by hand instead
+   (`cd tools/terrain; py -u stream.py run 63 52`; DDDA still needs `play_bridge.bat`
+   to read the tiles).
+2. If the graph layout changes (NODES or NODE_STEP), run `py stream.py clear`
+   (generated tiles and `stream_state.json`) and regenerate **with DDDA closed**.
 3. A tile DDDA already loaded is read again only after a save reload.
 
 ## Setup from a fresh clone
@@ -126,15 +140,13 @@ binaries). Everything is built and extracted on your own machine from your own c
    ```
 8. Game settings: DDDA windowed (see "Game settings" below), Skyrim borderless windowed.
 
-**Play:** open DDDA and load a save, then open Skyrim through `skse64_loader.exe` and
+**Play:** start DDDA with `play_bridge.bat` and load a save, then open Skyrim through `skse64_loader.exe` and
 load a save. The party links after a few seconds. Skyrim's collision is exported to
 `Data\SKSE\Plugins\DDDA_havok\` as you walk around.
 
-**Undo:** the streamer rewrites DDDA's tile archives (`nativePC\rom\stage\stage100`)
-and keeps every original in `backups/ddda_arc/` first. To get plain DDDA back:
-1. Delete `ddda_streamer.txt`.
-2. Run `cd tools/terrain; py stream.py restore`.
-3. Remove `dinput8.dll`.
+**Plain DDDA:** start it from Steam. Nothing in DDDA's folder is rewritten: generated
+tiles live in `tools/terrain/overlay/` and are read only in a bridge session. To remove
+the project, delete `dinput8.dll`, `ddda_streamer.txt` and `ddda_experiment.txt`.
 
 ## How to run
 
@@ -149,7 +161,9 @@ and keeps every original in `backups/ddda_arc/` first. To get plain DDDA back:
 src/common/bridge_shared.h   party state + camera command layouts (fixed-width; same for x86 and x64)
 src/common/frame_shared.h    frame transport layout (color + mask planes)
 src/ddda_bridge/             the DDDA-side DLL, built as dinput8.dll (x86):
-  dllmain.cpp                  party capture, camera override, Arisen hiding/following, focus
+  dllmain.cpp                  party capture, camera override, Arisen hiding/following, focus,
+                               bridge session (ddda_session.txt from play_bridge.bat)
+  file_overlay.cpp             in a session, DDDA's file opens get tools/terrain/overlay's copy
   frame_capture.cpp            D3D9 Present hook, frame read-back into shared memory
   frame_trace.cpp              D3D9 state hooks + one-frame call trace (ddda_trace_request)
   isolate.cpp                  party-only rendering (learns the party's vertex buffers)
@@ -158,7 +172,9 @@ src/skse_plugin/plugin.cpp   Skyrim SKSE plugin (x64): reads the party, sends Sk
                              lighting, switches to an interior's arena mapping
 src/skse_ghosts/             DDDAGhosts (CommonLibSSE, build_skse.bat): ground raycasts and
   havok_export.cpp             live export of Skyrim's static collision per cell
+play_bridge.bat              starts DDDA in a bridge session
 tools/terrain/               DDDA tile formats (sbc, way, arc) and the streamer (stream.py,
+                             overlay.py = where generated tiles go, never the game folder,
                              havok.py = live collision, obstacles.py = .esm fallback,
                              trail.py = party trails over the floor and graphs)
 src/reshade_addon/addon.cpp  Skyrim ReShade add-on (x64): draws DDDA's frames over Skyrim
@@ -203,8 +219,8 @@ With DDDA closed, copy `build/x86/dinput8.dll` into the game folder
 `ddda_bridge.log` into the same folder.
 
 To uninstall, delete `dinput8.dll` (and `ddda_bridge.log`) from the game
-folder. The DLL itself never touches game files or saves, but the terrain streamer
-does: it rewrites tile archives, with backups. See "Undo" above.
+folder. Neither the DLL nor the streamer writes game files or saves: generated tiles
+stay in `tools/terrain/overlay/`.
 
 Only Steam build 2364871 of DDDA is supported. On any other build, the DLL
 detects unexpected code and installs no game hooks; it only forwards input.

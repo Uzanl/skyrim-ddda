@@ -110,8 +110,8 @@ terrain of tile **64m54n** exactly.
 
 **In-game test (installed 2026-10-02):** `tools/terrain/tile_test.py` replaced tile
 64m54n's `h` collision with a generated grid (2 m cells) sampled from its own terrain
-and lowered by 1 m. The original is in `backups/ddda_arc/`; `py tile_test.py restore 64 54`
-puts it back. **VERIFIED:** the user saw the party walking 1 m below the visible ground,
+and lowered by 1 m (written into the game folder then; tile_test.py now uses the
+overlay, see "Overlay"). **VERIFIED:** the user saw the party walking 1 m below the visible ground,
 as predicted. DDDA accepts generated SBC tiles.
 
 ## Waypoint graph format (decoded 2026-10-02, tools/terrain/way.py)
@@ -321,6 +321,30 @@ mapping it sent the party to ungenerated ground (2026-10-02), so the link used t
 - Limits: the 2 m graph inside a small house splits into islands around furniture (the
   pawns stay close to the Arisen there anyway); dungeons (several tiles, up to the map's
   depth of 5 tiles from an edge) and cells joined by load doors are not tested.
+
+## Overlay (2026-10-03): built, tested outside the game
+
+Until 2026-10-03 the streamer wrote its tiles into DDDA's folder (originals in
+`backups/ddda_arc/`) and left "hold" on. Plain DDDA then had 204 tiles of Skyrim's ground
+(an invisible map over Gransys) and the party's physics asleep: the user saw pawns that
+no longer followed. All 376 archives were restored and checked byte for byte.
+
+Now:
+- `tools/terrain/overlay.py`: generated archives go to `overlay/nativePC/...`, the same
+  layout as the game's. stream.py (`install`), synth_test.py and tile_test.py write only
+  there; the game's own files are read as the originals. `py stream.py clear` removes
+  them all (and `stream_state.json`).
+- `play_bridge.bat` writes `ddda_session.txt` (line 1: the overlay folder) next to
+  DDDA.exe and starts DDDA through Steam. The DLL reads and deletes it in DllMain
+  (ignored after 5 minutes). Without it: no streamer, no overlay, "hold" ignored.
+- In a session, `src/ddda_bridge/file_overlay.cpp` replaces DDDA.exe's `CreateFileW` and
+  `CreateFileA` imports: an open for reading of a path containing `nativePC\` gets
+  `<overlay>\nativePC\...` when that file exists; writes and other files are unchanged.
+- Tested outside the game (2026-10-03) with a test program that imports both functions:
+  reads got the overlay's copy (both APIs, either slash), other files and writes went to
+  the original, a second start without `ddda_session.txt` was plain. **Not tested in
+  game:** it assumes DDDA opens tile archives through its own CreateFile imports. The log
+  names the first three `.arc` opens per API, and one line per redirected file.
 
 ## Open questions
 

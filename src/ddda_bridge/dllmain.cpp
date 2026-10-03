@@ -15,6 +15,7 @@
 
 #include "../common/bridge_shared.h"
 #include "frame_capture.h"
+#include "file_overlay.h"
 #include "frame_trace.h"
 #include "isolate.h"
 #include "relight.h"
@@ -79,6 +80,14 @@ constexpr ULONGLONG kShowDelayMs = 500;  // override off this long before the Ar
 
 HMODULE g_self = nullptr;
 wchar_t g_folder[MAX_PATH] = L".";
+
+// Bridge session: DDDA started by play_bridge.bat, which writes ddda_session.txt next to
+// DDDA.exe (line 1: the tile overlay's folder) just before it starts the game. Only then
+// are the streamer, the tile overlay (file_overlay.h) and "hold" active; DDDA started any
+// other way is the plain game (2026-10-03: the streamer's tiles and "hold", always on,
+// broke the pawns of a normal game). The file is consumed, and ignored when stale.
+bool g_session = false;
+constexpr ULONGLONG kSessionMaxAgeMs = 5 * 60 * 1000;
 uintptr_t g_base = 0;
 volatile LONG g_stop = 0;
 bridge::State* g_state = nullptr;
@@ -1235,7 +1244,7 @@ void PollExperiment(const wchar_t* folder) {
         else Log("frame pose delay: %d camera updates", poseDelay);
     }
     bool follow = strncmp(line, "follow on", 9) == 0;
-    bool hold = holdLine;
+    bool hold = holdLine && g_session;
     if (hold != (g_terrainHold != 0)) {
         InterlockedExchange(&g_terrainHold, hold ? 1 : 0);
         Log("terrain hold %s", hold ? "ON (party held until Skyrim links)" : "OFF");
@@ -1520,6 +1529,40 @@ HHOOK WINAPI HookSetWindowsHookExA(int id, HOOKPROC proc, HINSTANCE mod, DWORD t
     Log("game SetWindowsHookExA(id %d, proc %p, tid %lu) = %p%s", id, proc, tid, h,
         use != proc ? " [filtered]" : "");
     return h;
+}
+
+void* PatchImport(const char* dll, const char* func, void* hook);
+
+// Reads and deletes ddda_session.txt (see g_session); in a session, installs the overlay.
+void StartSession() {
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%s\\ddda_session.txt", g_folder);
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &attr)) {
+        Log("no bridge session (DDDA not started by play_bridge.bat): plain game, no streamer, no overlay");
+        return;
+    }
+    FILETIME nowFt;
+    GetSystemTimeAsFileTime(&nowFt);
+    ULARGE_INTEGER now{{nowFt.dwLowDateTime, nowFt.dwHighDateTime}};
+    ULARGE_INTEGER written{{attr.ftLastWriteTime.dwLowDateTime, attr.ftLastWriteTime.dwHighDateTime}};
+    ULONGLONG ageMs = now.QuadPart > written.QuadPart ? (now.QuadPart - written.QuadPart) / 10000 : 0;
+    wchar_t root[MAX_PATH] = {};
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path, L"r, ccs=UTF-8") == 0 && f) {
+        if (!fgetws(root, MAX_PATH, f)) root[0] = 0;
+        fclose(f);
+    }
+    DeleteFileW(path);
+    for (size_t n = wcslen(root); n && (root[n - 1] == L'\n' || root[n - 1] == L'\r' || root[n - 1] == L' '); --n)
+        root[n - 1] = 0;
+    if (ageMs > kSessionMaxAgeMs || !root[0]) {
+        Log("ddda_session.txt ignored (%s): plain game", root[0] ? "stale" : "empty");
+        return;
+    }
+    g_session = true;
+    Log("bridge session (ddda_session.txt, %llu s old)", ageMs / 1000);
+    file_overlay::Install(&Log, &PatchImport, root);
 }
 
 // Replaces an import of DDDA.exe; returns the original function or nullptr.
@@ -1878,6 +1921,7 @@ void Publish(bool hooks, const Captured* snap, LONGLONG now) {
 HANDLE g_streamerJob = nullptr;
 
 void LaunchStreamer() {
+    if (!g_session) return;
     wchar_t path[MAX_PATH];
     swprintf_s(path, L"%s\\ddda_streamer.txt", g_folder);
     FILE* f = nullptr;
@@ -2072,6 +2116,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
                 wcscpy_s(g_folder, dir);
             }
         }
+        StartSession();
         Log("Direct3DCreate9 import %s", create9 ? "hooked" : "not found");
         // The thread starts running once the loader lock is released.
         HANDLE t = CreateThread(nullptr, 0, BridgeThread, nullptr, 0, nullptr);

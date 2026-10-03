@@ -71,6 +71,7 @@ def view(path, cx=None, cz=None, R=None, out=None):
     import cv2
     import arc
     import havok
+    import overlay
     import stream
     import way
     rows = [(float(t), r, float(x), float(y), float(z)) for t, r, x, y, z in csv.reader(open(path))]
@@ -98,7 +99,7 @@ def view(path, cx=None, cz=None, R=None, out=None):
     m0, n0 = int(np.floor((cz + 5000) / 10000)) + 50, int(np.floor((cx + 5000) / 10000)) + 50
     for mm in (m0 - 1, m0, m0 + 1):
         for nn in (n0 - 1, n0, n0 + 1):
-            p = stream.way_arc(mm, nn)
+            p = overlay.current(stream.way_arc(mm, nn))
             if not os.path.exists(p):
                 continue
             e = next((e for e in arc.entries(p) if e[1] == stream.WAY_TYPE), None)

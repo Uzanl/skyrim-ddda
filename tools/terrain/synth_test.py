@@ -3,7 +3,7 @@ the party with ones generated from a single height function, then check that paw
 still follow the Arisen on ground that no longer matches the visible scenery.
 
 Usage: py synth_test.py build X Y Z     (Arisen GLOBAL position from the dump, cm)
-       py synth_test.py install         (game closed; backs up originals once)
+       py synth_test.py install         (into the overlay, overlay.py)
        py synth_test.py restore
 
 Height function (global coordinates): a flat plane 50 cm under the Arisen's feet with
@@ -15,7 +15,6 @@ cross-tile "exp" links between the replaced graphs.
 import json
 import math
 import os
-import shutil
 import sys
 
 import numpy as np
@@ -24,12 +23,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "recon"))
 import arc  # noqa: E402
 import sbc  # noqa: E402
 import sbcgen  # noqa: E402
+import overlay  # noqa: E402
 import way  # noqa: E402
 
 ROM = r"E:\SteamLibrary\steamapps\common\DDDA\nativePC\rom\stage\stage100"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "out_synth")
-BACKUP = os.path.join(HERE, "..", "..", "backups", "ddda_arc")
 TILE = 10000.0
 SBC_TYPE, WAY_TYPE = 0x51FC779F, 0x5F36B659
 NODE_STEP = 400.0
@@ -198,21 +197,18 @@ def build_region(H, ms, ns, out_dir, meta, max_slope=None):
 
 
 def install(out_dir=OUT):
+    """Into the overlay (overlay.py): read by DDDA in a bridge session only."""
     man = json.load(open(os.path.join(out_dir, "manifest.json")))
-    os.makedirs(BACKUP, exist_ok=True)
     for dst in man["files"]:
-        bak = os.path.join(BACKUP, os.path.basename(dst))
-        if not os.path.exists(bak):
-            shutil.copy2(dst, bak)
-        shutil.copyfile(os.path.join(out_dir, os.path.basename(dst)), dst)
-    print(f"installed {len(man['files'])} archives (originals in {os.path.abspath(BACKUP)})")
+        overlay.put(dst, open(os.path.join(out_dir, os.path.basename(dst)), "rb").read())
+    print(f"installed {len(man['files'])} archives into {overlay.ROOT}")
 
 
 def restore(out_dir=OUT):
     man = json.load(open(os.path.join(out_dir, "manifest.json")))
     for dst in man["files"]:
-        shutil.copy2(os.path.join(BACKUP, os.path.basename(dst)), dst)
-    print(f"restored {len(man['files'])} archives")
+        overlay.remove(dst)
+    print(f"removed {len(man['files'])} archives from the overlay")
 
 
 if __name__ == "__main__":

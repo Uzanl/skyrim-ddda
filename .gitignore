@@ -32,4 +32,5 @@ tools/terrain/stream_config.json
 tools/terrain/stream_state.json
 tools/terrain/tracker_state.json
 tools/terrain/_*.arc
+tools/terrain/overlay/
 .claude/settings.local.json

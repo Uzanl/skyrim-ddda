@@ -19,12 +19,14 @@ its neighbours' nodes ("exp" links) before they are generated.
 Usage: py stream.py config SKY_X SKY_Y DD_X DD_Z   anchor: Skyrim point = DD global point
        py stream.py tile M N                       generate one tile (collision + graph)
        py stream.py run [M N]                      keep generating around the party
-       py stream.py restore                        put every original archive back
+       py stream.py clear                          remove every generated archive (overlay.py)
+
+Generated archives go into the overlay (overlay.py), never into DDDA's folder: the game's
+files stay its own and are read here as the originals.
 """
 import json
 import math
 import os
-import shutil
 import sys
 import threading
 import time
@@ -35,6 +37,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "recon"))
 import arc  # noqa: E402
 import havok  # noqa: E402
 import obstacles  # noqa: E402
+import overlay  # noqa: E402
 import sbc  # noqa: E402
 import sbcgen  # noqa: E402
 import spotcheck as sc  # noqa: E402  (Skyrim height grid)
@@ -42,7 +45,6 @@ import way  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROM = r"E:\SteamLibrary\steamapps\common\DDDA\nativePC\rom\stage\stage100"
-BACKUP = os.path.join(HERE, "..", "..", "backups", "ddda_arc")
 CONFIG = os.path.join(HERE, "stream_config.json")
 STATE = os.path.join(HERE, "stream_state.json")
 SKYRIM_PLUGINS = r"E:\SteamLibrary\steamapps\common\Skyrim Special Edition\Data\SKSE\Plugins"
@@ -176,20 +178,8 @@ def way_arc(m, n):
     return os.path.join(ROM, "split_way", sub(m, n), f"st100_{m}m{n}n_way.arc")
 
 
-def original(path):
-    """The game's own archive: the backup if we replaced it before, else the file."""
-    bak = os.path.join(BACKUP, os.path.basename(path))
-    return bak if os.path.exists(bak) else path
-
-
 def install(path, data):
-    os.makedirs(BACKUP, exist_ok=True)
-    bak = os.path.join(BACKUP, os.path.basename(path))
-    if not os.path.exists(bak):
-        shutil.copy2(path, bak)
-    tmp = path + ".tmp"
-    open(tmp, "wb").write(data)
-    os.replace(tmp, path)
+    overlay.put(path, data)
 
 
 _has_way = {}
@@ -199,7 +189,7 @@ def has_way(m, n):
     """The game's own tile (m, n) has a waypoint graph (asked for every border link: cached)."""
     if (m, n) not in _has_way:
         p = way_arc(m, n)
-        _has_way[(m, n)] = os.path.exists(p) and any(e[1] == WAY_TYPE for e in arc.entries(original(p)))
+        _has_way[(m, n)] = os.path.exists(p) and any(e[1] == WAY_TYPE for e in arc.entries(p))
     return _has_way[(m, n)]
 
 
@@ -210,7 +200,7 @@ def original_part(path, kind):
     """(archive, entry name, parsed) of the game's own collision ("sbc": sbc.parse of the
     st100h_ entry) or graph ("way": node count) of a tile, cached while the archive is
     unchanged (an arena re-read 25 originals per entry)."""
-    src = original(path)
+    src = path
     key = (src, os.path.getmtime(src), kind)
     if key not in _originals:
         if kind == "sbc":
@@ -835,20 +825,12 @@ def run(start=None):
               flush=True)
 
 
-def restore():
-    n = 0
-    for f in os.listdir(BACKUP):
-        if not f.startswith("st100_"):
-            continue
-        is_way = f.endswith("_way.arc")
-        mm, nn = f[6:].split("m")[0], f[6:].split("m")[1].split("n")[0]
-        dst = way_arc(int(mm), int(nn)) if is_way else col_arc(int(mm), int(nn))
-        shutil.copy2(os.path.join(BACKUP, f), dst)
-        n += 1
+def clear():
+    n = overlay.clear()
     if os.path.exists(STATE):
         os.remove(STATE)
     set_hold(False)
-    print(f"restored {n} archives")
+    print(f"removed {n} generated archives")
 
 
 if __name__ == "__main__":
@@ -862,5 +844,5 @@ if __name__ == "__main__":
         print(f"collision {c} graph {w} {dt:.1f}s")
     elif cmd == "run":
         run((int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) > 3 else None)
-    elif cmd == "restore":
-        restore()
+    elif cmd == "clear":
+        clear()
