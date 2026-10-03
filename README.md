@@ -25,31 +25,37 @@ Skyrim shows the result. The two processes talk through shared memory
 | Pathfinding on that ground: floors reachable on foot, 2 m waypoint graph centred in narrow passages | done, verified in game 2026-10-03 (narrow bridge and a stair in Riverwood; 57-60 fps) |
 | Lighting: Skyrim's sun, ambient and fog on DDDA's lights | done, verified in game |
 | Streamer starts and stops with DDDA (no terminal) | done, verified |
-| Interiors | link pauses inside (the party waits outside); pawns inside interiors not started |
+| Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
-## Where we stopped (2026-10-03)
+## Where we stopped (2026-10-03, evening)
 
-- **Dense graph: works.** All tiles were regenerated in the 2 m layout (Riverwood and the
-  default start). The pawns crossed the narrow bridge "quase sem problemas" (the user).
-  DDDA stayed at 57-60 fps (`tools/recon/ddfps.py`).
-- **Stairs: fixed** (the user: "funcionou"). The pawns tried and bounced back: the lip
-  ramps left most stair risers uncovered. Ramps are now continuous cones from flat built
-  floors ([docs/terrain-proxy.md](docs/terrain-proxy.md), "Invisible ramps"). The main
-  pawn and a hired pawn climbed onto the deck; `tools/terrain/trail.py` records and draws
-  the trails.
-- Watch: ramps cost 9-42k triangles per Riverwood tile (5-14k before). A large city
-  (Whiterun, Solitude) and steep stone stairs (Markarth) are not tested.
-- Periodic ~165 ms gaps in the published frames come from isolate learning cycles (10 "on
-  demand" in the minute after a save reload), not from the ground.
-- Decided 2026-10-03: navigation stays DDDA's own (waypoint graph on the generated
-  ground). Letting Skyrim's navmesh lead the pawns was considered and dropped.
+- **Interiors: the party follows inside** (the user: "funcionou ok", three Riverwood
+  houses). DDDAGhosts exports the interior cell's collision; the streamer builds it into
+  an "arena" far away in DDDA's map and writes `DDDABridge_interior.ini`; the plugin
+  switches to that mapping and the party leaps in. Leaving is immediate (the world's
+  ground is still there). [docs/terrain-proxy.md](docs/terrain-proxy.md), "Interiors".
+  - Entering takes 4-6 s: the export (0.5 s after the cell attaches), then the arena
+    (1.9 s alone, 3-6 s while the main loop generates a world tile in the same Python
+    process). Re-entering the same interior reuses its arena (0.1 s in a simulation).
+  - Fixed on the way: pawns were dragged "like a magnet" after arriving (the protection
+    held them at the Arisen's current spot each frame; now at the arrival spot), and were
+    invisible 1.7 s (the isolate forgot the party's buffers when the link paused; now it
+    keeps them 2 minutes).
+  - A bug put one arena on Riverwood's own tiles (a streamer restarted while the player
+    was inside took the old arena as the party's tile). Arenas now keep away from every
+    tile the player has been near.
+- **Stairs and the dense graph: work** (earlier today). Ramps are continuous cones from
+  flat built floors; they cost 9-42k triangles per Riverwood tile. A large city and steep
+  stone stairs are not tested.
+- Decided 2026-10-03: navigation stays DDDA's own. Letting Skyrim's navmesh lead the
+  pawns was considered and dropped.
 
 Next, in order:
-1. **Pawns inside interiors**: export the interior cell's Havok, move the mapping to a
-   DDDA "arena" tile (like the edge leaps), and build the ground from the interior's
-   triangles only.
+1. Interiors, polish: faster entry (build the arena while the world's streaming waits),
+   larger interiors (dungeons are not tested; the graph inside a small house splits into
+   islands around furniture), interior cells connected by load doors.
 2. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
    refunded and mirrored to their HP, then DDDA stand-ins for Skyrim enemies with damage
    going through Skyrim's hit pipeline. Pawn arrows and spells must also be drawn
@@ -145,7 +151,7 @@ src/ddda_bridge/             the DDDA-side DLL, built as dinput8.dll (x86):
   isolate.cpp                  party-only rendering (learns the party's vertex buffers)
   relight.cpp                  Skyrim's sun, ambient and fog on DDDA's uSky* lights
 src/skse_plugin/plugin.cpp   Skyrim SKSE plugin (x64): reads the party, sends Skyrim's camera and
-                             lighting, pauses the link in interiors
+                             lighting, switches to an interior's arena mapping
 src/skse_ghosts/             DDDAGhosts (CommonLibSSE, build_skse.bat): ground raycasts and
   havok_export.cpp             live export of Skyrim's static collision per cell
 tools/terrain/               DDDA tile formats (sbc, way, arc) and the streamer (stream.py,

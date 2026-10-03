@@ -396,6 +396,70 @@ class Live:
         return r["occ"][k][j, i]
 
 
+INTERIOR_DIR = os.path.join(DIR, "interior")
+CURRENT = os.path.join(DIR, "current.txt")
+
+
+def current_cell():
+    """DDDAGhosts' report of where the player is: an interior cell's form id, 0 outside, or
+    None (no report yet)."""
+    try:
+        words = open(CURRENT).read().split()
+    except OSError:
+        return None
+    if words[:1] == ["interior"] and len(words) > 1:
+        return int(words[1], 16)
+    return 0 if words[:1] == ["exterior"] else None
+
+
+def interior_path(cell):
+    return os.path.join(INTERIOR_DIR, f"{cell:08X}.bin")
+
+
+class InteriorLive(Live):
+    """An interior cell's collision (one file, its own coordinates) mapped into an arena of
+    DDDA's world: the same queries as Live, `covered` is the interior's footprint."""
+
+    def __init__(self, cell, cfg, K, base):
+        self.key = ("interior", cell)
+        self.path = interior_path(cell)
+        super().__init__(cfg, K, base)
+        tri = self._cell(self.key)["tri"]
+        self.lo, self.hi = tri.min((0, 1)), tri.max((0, 1))
+
+    def refresh(self):
+        self._files = {self.key: (self.path, os.path.getmtime(self.path))}
+        self._cache = getattr(self, "_cache", {})
+        return []
+
+    def _keys_for(self, x0, z0, x1, z1):
+        return [self.key]
+
+    def raster(self, x0, z0, x1, z1):
+        """One raster over the whole interior answers every query (nothing lies outside it):
+        rebuilt per query area, an arena took 14 s (77 rasters, 71 reach graphs)."""
+        r = getattr(self, "_r", None)
+        if r is None:
+            r = Live.raster(self, self.lo[0] - 1000, self.lo[2] - 1000, self.hi[0] + 1000, self.hi[2] + 1000)
+        return r
+
+    def covered(self, x, z):
+        x, z = np.asarray(x, float), np.asarray(z, float)
+        return (x >= self.lo[0] - 200) & (x <= self.hi[0] + 200) & (z >= self.lo[2] - 200) & (z <= self.hi[2] + 200)
+
+    def lowest_floor(self, X, Z):
+        """The lowest walkable surface at each point (NaN: none): where the reachable floors
+        start, as the .esm terrain does outside."""
+        X, Z = np.asarray(X, float), np.asarray(Z, float)
+        r = self.raster(X.min(), Z.min(), X.max(), Z.max())
+        if "low" not in r:
+            low = np.full(r["nx"] * r["nz"], np.inf)
+            np.minimum.at(low, r["cell"][r["walk"]], r["y"][r["walk"]])
+            r["low"] = np.where(np.isfinite(low), low, np.nan)
+        i, j = self._ij(r, X, Z)
+        return r["low"][j * r["nx"] + i]
+
+
 def sample(tri, n, tag=None, step=SAMPLE):
     """Points on every triangle about `step` apart (vertices and centroids included),
     whether each point lies on a walkable (floor) triangle, and (with `tag`, one bool per

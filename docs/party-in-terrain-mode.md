@@ -38,6 +38,14 @@ Known limit of the kinematic Arisen: on a Skyrim roof or rock (not part of DDDA'
 generated ground yet) it floats above DDDA's ground there; the pawns may then fail to
 reach it (DDDA used to "glue" pawns onto an unreachable leader).
 
+## The protection holds the pawns at the arrival spot
+
+A link or a leap upwards protects the pawns for `kProtectMs` (2.5 s): they are placed next
+to where the Arisen arrived, asleep, while DDDA loads the ground there. The spot used to
+follow the Arisen every frame, so a player who walked on at once dragged the pawns along
+"like a magnet" (entering interiors, 2026-10-03). It is now fixed at the arrival spot;
+verified in game the same day.
+
 ## DDDA's fall damage: how it really works
 
 - The scenery adjust (`cScrAdjust`, char+0x19C0) keeps the previous frame's position in

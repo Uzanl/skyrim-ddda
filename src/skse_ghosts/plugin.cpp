@@ -334,6 +334,7 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* skse) {
         spdlog::error("messaging listener failed");
         return false;
     }
+    havok_export::Reset();
     std::thread(UpdateLoop).detach();
     return true;
 }

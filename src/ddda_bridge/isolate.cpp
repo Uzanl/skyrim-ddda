@@ -23,6 +23,10 @@ constexpr ULONGLONG kOnDemandGapMs = 1000;  // minimum gap between cycles while 
 constexpr ULONGLONG kOnDemandWindowMs = 10000;  // on-demand cycles only this long after linking
 constexpr ULONGLONG kOnDemandGapLateMs = 5000;  // after that, unknown meshes (mostly new scenery) wait this long
 constexpr ULONGLONG kFirstLearnMs = 1500;  // after linking: the camera just jumped, DDDA is streaming
+// The learned party buffers survive a short unlink (an interior's arena being built: the link
+// pauses for a few seconds), so the pawns are drawn the moment it resumes instead of after a
+// new learning cycle (1.7 s invisible, 2026-10-03). Wrong ones are removed by the early cycles.
+constexpr ULONGLONG kForgetMs = 120000;
 constexpr ULONGLONG kRetryMs = 500;        // after a cycle discarded because the scene changed
 constexpr int kSettleFrames = 3;          // frames for a mask change to reach the renderer
 constexpr int kRecordFrames = 2;          // two frames, so per-frame ring buffers cancel out
@@ -92,6 +96,7 @@ int g_counter = 0;
 ULONGLONG g_nextAllowed = 0;  // no cycle starts before this
 ULONGLONG g_periodicDue = 0;  // a cycle starts at this time even without unknown meshes
 ULONGLONG g_linkTick = 0;     // when the current link started
+ULONGLONG g_unlinkTick = 0;   // when the last link ended
 ULONGLONG g_lastCycleEnd = 0;
 
 struct SavedMask {
@@ -254,6 +259,7 @@ void OnPresent() {
         g_nextAllowed = g_periodicDue = now + kFirstLearnMs;
         g_linkTick = now;
     }
+    if (!linked && g_wasLinked) g_unlinkTick = now;
     g_wasLinked = linked;
     switch (g_state) {
     case Learn::Idle: {
@@ -349,7 +355,7 @@ void OnPresent() {
         }
         break;
     }
-    if (!linked && g_state == Learn::Idle) {
+    if (!linked && g_state == Learn::Idle && now - g_unlinkTick > kForgetMs) {
         g_partyVbs.clear();
         g_otherVbs.clear();
     }

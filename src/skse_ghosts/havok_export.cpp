@@ -26,6 +26,9 @@ using Clock = std::chrono::steady_clock;
 
 constexpr float kCellSize = 4096.0f;            // Skyrim units per exterior cell
 constexpr auto kStableFor = std::chrono::seconds(3);  // attached this long before harvesting
+// An interior is loaded whole before the player sees it: harvested almost at once (3 s
+// was most of the wait before the party could join, 2026-10-03).
+constexpr auto kInteriorStableFor = std::chrono::milliseconds(500);
 constexpr int kMaxKeys = 16384;
 constexpr std::size_t kMaxTris = 600000;
 constexpr const char* kDir = "Data\\SKSE\\Plugins\\DDDA_havok";
@@ -427,13 +430,23 @@ struct CellKey {
 std::map<CellKey, Clock::time_point> g_firstSeen;  // attached cells not harvested yet
 std::set<CellKey> g_done;                          // harvested this session
 
-void WriteFile(CellKey key, std::vector<Tri> tris, uint32_t bodies) {
-    std::thread([key, tris = std::move(tris), bodies] {
-        std::error_code ec;
-        std::filesystem::create_directories(kDir, ec);
-        char name[128];
+// Exterior cells: DDDA_havok\{world}_{x}_{y}.bin. Interior cells: DDDA_havok\interior\{cell}.bin,
+// with the cell's form id as `worldspace` and x = y = 0.
+std::string FileName(CellKey key, bool interior) {
+    char name[160];
+    if (interior)
+        std::snprintf(name, sizeof(name), "%s\\interior\\%08X.bin", kDir, key.world);
+    else
         std::snprintf(name, sizeof(name), "%s\\%08X_%d_%d.bin", kDir, key.world, key.x, key.y);
-        std::string tmp = std::string(name) + ".tmp";
+    return name;
+}
+
+void WriteFile(CellKey key, bool interior, std::vector<Tri> tris, uint32_t bodies) {
+    std::thread([key, interior, tris = std::move(tris), bodies] {
+        const std::string name = FileName(key, interior);
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(name).parent_path(), ec);
+        std::string tmp = name + ".tmp";
         FILE* f = nullptr;
         if (fopen_s(&f, tmp.c_str(), "wb") != 0 || !f) {
             spdlog::error("havok export: cannot write {}", tmp);
@@ -444,11 +457,12 @@ void WriteFile(CellKey key, std::vector<Tri> tris, uint32_t bodies) {
         static_assert(sizeof(Tri) == sizeof(FileTri));
         if (!tris.empty()) fwrite(tris.data(), sizeof(Tri), tris.size(), f);
         fclose(f);
-        MoveFileExA(tmp.c_str(), name, MOVEFILE_REPLACE_EXISTING);
+        MoveFileExA(tmp.c_str(), name.c_str(), MOVEFILE_REPLACE_EXISTING);
     }).detach();
 }
 
-void Harvest(RE::bhkWorld* bhk, CellKey key) {
+// An exterior cell: the bodies inside its square. An interior cell: its whole physics world.
+void Harvest(RE::bhkWorld* bhk, CellKey key, bool interior) {
     auto* world = bhk->GetWorld1();
     if (!world) return;
     const auto t0 = Clock::now();
@@ -457,6 +471,8 @@ void Harvest(RE::bhkWorld* bhk, CellKey key) {
     job.lo[0] = key.x * kCellSize, job.hi[0] = (key.x + 1) * kCellSize;
     job.lo[1] = key.y * kCellSize, job.hi[1] = (key.y + 1) * kCellSize;
     job.lo[2] = -200000.0f, job.hi[2] = 200000.0f;
+    if (interior)
+        for (int i = 0; i < 2; ++i) job.lo[i] = -1.0e6f, job.hi[i] = 1.0e6f;
     uint32_t bodies = 0;
     std::map<int, int> layers;
     {
@@ -491,9 +507,31 @@ void Harvest(RE::bhkWorld* bhk, CellKey key) {
     const auto ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
     std::string layerText;
     for (auto [l, n] : layers) layerText += " " + std::to_string(l) + ":" + std::to_string(n);
-    spdlog::info("havok export: cell {:08X} ({}, {}): {} bodies, {} triangles, {} faults, {:.1f} ms | layers{}", key.world,
-                 key.x, key.y, bodies, job.tris.size(), job.faults, ms, layerText);
-    WriteFile(key, std::move(job.tris), bodies);
+    spdlog::info("havok export: {} {:08X} ({}, {}): {} bodies, {} triangles, {} faults, {:.1f} ms | layers{}",
+                 interior ? "interior" : "cell", key.world, key.x, key.y, bodies, job.tris.size(), job.faults, ms,
+                 layerText);
+    WriteFile(key, interior, std::move(job.tris), bodies);
+}
+
+// DDDA_havok\current.txt: "interior {cell form id}" or "exterior", rewritten when that changes,
+// so the streamer knows when to build an interior's ground (docs/terrain-proxy.md, "Interiors").
+uint32_t g_reported = 0xFFFFFFFF;  // interior cell reported last (0: exterior)
+
+void ReportCell(uint32_t interiorCell) {
+    if (interiorCell == g_reported) return;
+    std::error_code ec;
+    std::filesystem::create_directories(kDir, ec);
+    const std::string name = std::string(kDir) + "\\current.txt", tmp = name + ".tmp";
+    FILE* f = nullptr;
+    if (fopen_s(&f, tmp.c_str(), "w") != 0 || !f) return;
+    if (interiorCell)
+        std::fprintf(f, "interior %08X\n", interiorCell);
+    else
+        std::fprintf(f, "exterior\n");
+    fclose(f);
+    if (!MoveFileExA(tmp.c_str(), name.c_str(), MOVEFILE_REPLACE_EXISTING)) return;
+    g_reported = interiorCell;
+    spdlog::info("havok export: player in {} {:08X}", interiorCell ? "interior" : "exterior", interiorCell);
 }
 
 }  // namespace
@@ -501,18 +539,40 @@ void Harvest(RE::bhkWorld* bhk, CellKey key) {
 void Reset() {
     g_firstSeen.clear();
     g_done.clear();
+    // Until the next update says where the player is, nobody is in an interior (a report left by
+    // a game that closed inside one would stop the streamer's world streaming).
+    std::error_code ec;
+    std::filesystem::remove(std::string(kDir) + "\\current.txt", ec);
+    g_reported = 0xFFFFFFFF;
 }
 
 void Update() {
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* tes = RE::TES::GetSingleton();
-    if (!player || !tes || !tes->gridCells) return;
+    if (!player || !tes) return;
     auto* playerCell = player->GetParentCell();
-    if (!playerCell || playerCell->IsInteriorCell()) return;  // interiors: later (no cell grid)
+    if (!playerCell) return;
+    const auto now = Clock::now();
+    if (playerCell->IsInteriorCell()) {
+        // An interior is loaded whole: harvest it once it has been attached for a while.
+        const uint32_t id = playerCell->GetFormID();
+        ReportCell(id);
+        const CellKey key{id, 0, 0};
+        auto* bhk = playerCell->GetbhkWorld();
+        if (!bhk || !playerCell->IsAttached() || g_done.count(key)) return;
+        std::erase_if(g_firstSeen, [&](const auto& e) { return e.first != key; });
+        auto [it, fresh] = g_firstSeen.try_emplace(key, now);
+        if (fresh || now - it->second < kInteriorStableFor) return;
+        Harvest(bhk, key, true);
+        g_done.insert(key);
+        g_firstSeen.erase(it);
+        return;
+    }
+    ReportCell(0);
+    if (!tes->gridCells) return;
     auto* worldspace = player->GetWorldspace();
     auto* bhk = playerCell->GetbhkWorld();
     if (!worldspace || !bhk) return;
-    const auto now = Clock::now();
     const uint32_t n = tes->gridCells->length;
     std::set<CellKey> attached;
     for (uint32_t gx = 0; gx < n; ++gx) {
@@ -531,7 +591,7 @@ void Update() {
         if (g_done.count(key)) continue;
         auto [it, fresh] = g_firstSeen.try_emplace(key, now);
         if (fresh || now - it->second < kStableFor) continue;
-        Harvest(bhk, key);
+        Harvest(bhk, key, false);
         g_done.insert(key);
         g_firstSeen.erase(it);
         break;

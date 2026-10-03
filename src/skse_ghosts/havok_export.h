@@ -8,6 +8,10 @@
 // builds DDDA's collision tiles and waypoint graphs from these files where they
 // exist, and from Skyrim.esm (terrain + object raster) elsewhere.
 //
+// Interiors: the player's interior cell is harvested whole into DDDA_havok\interior\
+// {cell form id}.bin, and DDDA_havok\current.txt says "interior {id}" or "exterior";
+// the streamer builds the interior's ground in an "arena" of DDDA's map from it.
+//
 // Shape walking is ported from SkyCraft (MIT, github.com/chasmlol/SkyCraft,
 // skse/src/Collision.cpp): Havok layouts are partly reverse-engineered there, so
 // every read runs under SEH.
@@ -17,7 +21,8 @@ namespace havok_export {
 
 // Main thread, a few times a second while in the world.
 void Update();
-// A new game was loaded: cells are harvested again (another save may differ).
+// Plugin load and every game load: cells are harvested again (another save may differ)
+// and the "player in an interior" report is cleared until the next update.
 void Reset();
 
 }  // namespace havok_export

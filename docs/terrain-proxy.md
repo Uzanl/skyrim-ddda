@@ -280,12 +280,42 @@ rebuilding it offline.
   into an old-layout neighbour would point at wrong nodes.
 - **Limits**: DDDA reads a tile only when it loads, so the first pass through a place can
   still use the .esm version; exported cells persist across sessions. Doors and other
-  moving bodies are not exported (fixed island only). Interiors: not yet.
+  moving bodies are not exported (fixed island only). Interiors: see below.
 - Tools: `py havok.py list`, `py havok.py view M N` (live floor minus .esm terrain; solid
   cells, yellow = not exported).
 - `py trail.py record OUT.csv` logs the party's DD global positions at 10 Hz from the
   bridge State; `py trail.py view OUT.csv [CX CZ R]` draws the trails over the reachable
   floor and the waypoint graphs (where a pawn stops on a stair, a deck, a bridge).
+
+## Interiors (2026-10-03, verified in game)
+
+An interior has its own coordinates, unrelated to the world map. Mapped with the world's
+mapping it sent the party to ungenerated ground (2026-10-02), so the link used to pause.
+
+- **Export** (DDDAGhosts, `havok_export.cpp`): when the player's cell is an interior and
+  has been attached 0.5 s, its whole physics world (fixed island) is written to
+  `DDDA_havok/interior/{cell form id}.bin` (same DDHK v1 layout; `worldspace` = the cell's
+  form id). `DDDA_havok/current.txt` says `interior {id}` or `exterior`; it is deleted at
+  plugin load and on every game load, so a game closed inside an interior does not stop
+  the streamer.
+- **Arena** (`stream.py`, `Interiors` thread): the interior's middle is mapped to the
+  middle of the deepest-inside tile far from the party and from every tile near an
+  exported world cell (`plan_arena`). Its tiles get the interior's triangles plus ramps
+  (`havok.InteriorLive`: one raster over the whole interior answers every query) over a
+  flat catch floor 2 m under its lowest point; the 2 tiles around are catch floor only
+  (ring tiles DDDA does not have stay void). Graph nodes on the catch floor are cut off.
+  The base puts the lowest point 3 m above the Arisen, so the move goes up (the bridge's
+  protection takes the pawns along). A house (6-15k triangles): 25 tiles in 1.9 s.
+- **Mapping**: `DDDABridge_interior.ini` (`cell`, `sky`, `dd`). The plugin uses it while
+  the player is in that cell; until it exists the link pauses (the party waits). Leaving:
+  the plugin goes back to the world's mapping (a leap down, DDDA's own warp brings the
+  pawns; immediate). The streamer removes the ini, puts the arena tiles back into its
+  "to generate" set and keeps the last arena for a quick re-entry while intact.
+- Measured 2026-10-03: entering takes 4-6 s, of which the arena 3-6 s while the main
+  loop generates a world tile in the same process (1.9 s alone).
+- Limits: the 2 m graph inside a small house splits into islands around furniture (the
+  pawns stay close to the Arisen there anyway); dungeons (several tiles, up to the map's
+  depth of 5 tiles from an edge) and cells joined by load doors are not tested.
 
 ## Open questions
 

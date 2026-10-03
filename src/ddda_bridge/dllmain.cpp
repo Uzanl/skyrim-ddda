@@ -837,7 +837,7 @@ constexpr int kTerrainMaxProtects = 5;
 constexpr float kLandHeight = 30.0f;
 volatile LONG g_terrainSuspended = 0;
 volatile LONG64 g_protectUntil = 0;  // GetTickCount64 deadline
-float g_protectGlobal[3];             // Arisen's target, global (pawns are placed around it)
+float g_protectGlobal[3];             // where the Arisen arrived, global (pawns are held around it)
 int g_protects = 0;
 ULONGLONG g_protectWindow = 0;
 bool g_wasTerrainLinked = false;
@@ -954,7 +954,9 @@ void TerrainFollowUnsafe(uintptr_t self, const CamOverride& o) {
     } else if (jx * jx + jz * jz > kLeapDistance * kLeapDistance) {
         StartProtect(o.body, "leap", true);
     }
-    if (Protecting()) memcpy(g_protectGlobal, o.body, sizeof(g_protectGlobal));
+    // The pawns are held where the Arisen arrived, not where it walks next: following it
+    // each frame dragged them along "like a magnet" for kProtectMs whenever the player
+    // walked on right after a link (an interior's arena, 2026-10-03).
     SleepAdjust(self, true);
     p[0] = t[0];
     p[1] = t[1] + kArisenLift;

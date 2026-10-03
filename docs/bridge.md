@@ -168,6 +168,9 @@ TANGENT float2 @16 (UVs).
   trees' shadows from before filtering stayed frozen on the pawns as leaf-like
   dapples (the user spotted it in Mariana's hair). The sun-light quad and the
   post-processing were also dropped. Fixed 2026-10-01; pending test.
+- **Short unlinks keep the learned buffers** (`kForgetMs`, 2 min): the link pauses while an
+  interior's arena is built, and relearning from scratch left the pawns invisible 1.7 s
+  after it resumed (2026-10-03).
 - **Learning the party's vertex buffers:** every 4 s the bridge records the mesh
   vertex buffers of 2 visible frames, hides the pawns and their carried models
   (parts masks), records 2 hidden frames, shows them again and records 2 more

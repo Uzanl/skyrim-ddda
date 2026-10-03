@@ -431,27 +431,34 @@ void PublishAnchor(bridge::Anchor* a, bool valid, const float* sky, const float*
 // `sky` is DDDA GLOBAL open-world point `dd`, the same transform used to generate
 // DDDA's collision from Skyrim's terrain. Commands then carry kGlobalCoords and DDDA
 // converts them to its tile-local space. Format: two lines "sky x y z" and "dd x y z".
+// Interiors (their own coordinates) get their own mapping onto an "arena" in DDDA's
+// world, written by the streamer when that interior's ground is ready:
+// DDDABridge_interior.ini, the same lines plus "cell XXXXXXXX" (the interior's form id).
 struct TerrainLink {
     bool on = false;
     float sky[3] = {};
     float dd[3] = {};
+    uint32_t cell = 0;  // interior mapping: the cell it is for
 };
 
-TerrainLink LoadTerrainLink() {
+TerrainLink LoadTerrainLink(const wchar_t* name = L"DDDABridge_terrain.ini") {
     TerrainLink t;
     wchar_t path[MAX_PATH];
     DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
     wchar_t* slash = n && n < MAX_PATH ? wcsrchr(path, L'\\') : nullptr;
     if (!slash) return t;
     *slash = 0;
-    std::wstring file = std::wstring(path) + L"\\Data\\SKSE\\Plugins\\DDDABridge_terrain.ini";
+    std::wstring file = std::wstring(path) + L"\\Data\\SKSE\\Plugins\\" + name;
     FILE* f = nullptr;
     if (_wfopen_s(&f, file.c_str(), L"r") != 0 || !f) return t;
     char line[256];
     bool sky = false, dd = false;
     while (fgets(line, sizeof(line), f)) {
         float a, b, c;
-        if (sscanf_s(line, "sky %f %f %f", &a, &b, &c) == 3) {
+        unsigned cell;
+        if (sscanf_s(line, "cell %x", &cell) == 1) {
+            t.cell = cell;
+        } else if (sscanf_s(line, "sky %f %f %f", &a, &b, &c) == 3) {
             t.sky[0] = a, t.sky[1] = b, t.sky[2] = c;
             sky = true;
         } else if (sscanf_s(line, "dd %f %f %f", &a, &b, &c) == 3) {
@@ -597,12 +604,18 @@ DWORD WINAPI LightThread(LPVOID) {
     }
 }
 
-// The player is in an interior cell (its own coordinates, unrelated to the world map).
-bool PlayerInInterior() {
+// The form id of the interior cell the player is in (its own coordinates, unrelated to
+// the world map), or 0 outside.
+constexpr uintptr_t kFormId = 0x14;  // TESForm
+uint32_t PlayerInteriorCell() {
     uintptr_t player, cell;
-    uint8_t flags[2];
-    return ReadPtr(g_base + kPlayerCharacterPtr, &player) && ReadPtr(player + kRefParentCell, &cell) && cell &&
-           ReadBytes(cell + kCellFlags, flags, 2) && (flags[0] & 1);
+    uint8_t flags[2], id[4];
+    if (!ReadPtr(g_base + kPlayerCharacterPtr, &player) || !ReadPtr(player + kRefParentCell, &cell) || !cell ||
+        !ReadBytes(cell + kCellFlags, flags, 2) || !(flags[0] & 1) || !ReadBytes(cell + kFormId, id, 4))
+        return 0;
+    uint32_t v;
+    memcpy(&v, id, 4);
+    return v ? v : 0xFFFFFFFF;  // an interior without an id still counts as one
 }
 
 DWORD WINAPI CameraThread(LPVOID) {
@@ -629,25 +642,52 @@ DWORD WINAPI CameraThread(LPVOID) {
     if (terrain.on)
         Log("terrain mode: Skyrim (%.0f, %.0f, %.0f) = DDDA global (%.0f, %.0f, %.0f)", terrain.sky[0], terrain.sky[1],
             terrain.sky[2], terrain.dd[0], terrain.dd[1], terrain.dd[2]);
+    TerrainLink inner;  // DDDABridge_interior.ini
     for (;;) {
+        SkyCamera sc = {};
+        bool ok = g_inGame && ReadSkyCamera(&sc);
+        const uint32_t interiorCell = ok && terrain.on ? PlayerInteriorCell() : 0;
         // Terrain streaming changes the mapping when the party leaps to another part of
-        // DDDA's map (tools/terrain/stream.py rewrites the ini): follow it live.
+        // DDDA's map, and writes an interior's mapping once its ground is built
+        // (tools/terrain/stream.py): follow both live.
         if (terrain.on && GetTickCount64() - lastIniCheck >= 250) {
             lastIniCheck = GetTickCount64();
             TerrainLink now = LoadTerrainLink();
-            if (now.on && (memcmp(now.sky, terrain.sky, sizeof(now.sky)) || memcmp(now.dd, terrain.dd, sizeof(now.dd)))) {
-                terrain = now;
-                memcpy(skyAnchor, terrain.sky, sizeof(skyAnchor));
-                memcpy(ddAnchor, terrain.dd, sizeof(ddAnchor));
-                Log("terrain mapping changed: Skyrim (%.0f, %.0f, %.0f) = DDDA global (%.0f, %.0f, %.0f)", terrain.sky[0],
-                    terrain.sky[1], terrain.sky[2], terrain.dd[0], terrain.dd[1], terrain.dd[2]);
-            }
+            if (now.on) terrain = now;
+            inner = interiorCell ? LoadTerrainLink(L"DDDABridge_interior.ini") : TerrainLink{};
+        }
+        // Interiors have their own coordinates: mapped with the world's mapping they sent the
+        // party to ungenerated ground (2026-10-02). Inside one, the link pauses (the party
+        // waits where it is, the bridge's "hold") until the streamer has built that interior's
+        // ground in an arena of DDDA's map and written its mapping; then the party leaps in.
+        const bool interior = interiorCell != 0;
+        const bool innerReady = interior && inner.on && inner.cell == interiorCell;
+        static uint32_t wasCell = 0;
+        static bool wasReady = false;
+        if (interiorCell != wasCell || innerReady != wasReady) {
+            if (!interior)
+                QueueConsole("[DD] Outside again: the party rejoins you.");
+            else if (!innerReady)
+                QueueConsole("[DD] Interior: building its ground; the party waits.");
+            else
+                QueueConsole("[DD] Interior ready: the party joins you.");
+            Log("player %s %08X: link %s", interior ? "in interior" : "outside", interiorCell,
+                !interior ? "on the world mapping" : innerReady ? "on the interior mapping" : "paused");
+            wasCell = interiorCell;
+            wasReady = innerReady;
+        }
+        const TerrainLink* map = !terrain.on ? nullptr : interior ? (innerReady ? &inner : nullptr) : &terrain;
+        if (map && anchored && (memcmp(map->sky, skyAnchor, sizeof(skyAnchor)) || memcmp(map->dd, ddAnchor, sizeof(ddAnchor)))) {
+            memcpy(skyAnchor, map->sky, sizeof(skyAnchor));
+            memcpy(ddAnchor, map->dd, sizeof(ddAnchor));
+            Log("%s mapping: Skyrim (%.0f, %.0f, %.0f) = DDDA global (%.0f, %.0f, %.0f)", interior ? "interior" : "terrain",
+                map->sky[0], map->sky[1], map->sky[2], map->dd[0], map->dd[1], map->dd[2]);
         }
         if (terrain.on) {
             g_anchorReset = false;
-            if (!anchored) {
-                memcpy(skyAnchor, terrain.sky, sizeof(skyAnchor));
-                memcpy(ddAnchor, terrain.dd, sizeof(ddAnchor));
+            if (!anchored && map) {
+                memcpy(skyAnchor, map->sky, sizeof(skyAnchor));
+                memcpy(ddAnchor, map->dd, sizeof(ddAnchor));
                 anchored = true;
                 QueueConsole("[DD] Terrain link: the party walks on Skyrim's ground.");
             }
@@ -656,20 +696,7 @@ DWORD WINAPI CameraThread(LPVOID) {
             anchored = false;
             Log("camera anchor cleared");
         }
-        SkyCamera sc = {};
-        bool ok = g_inGame && ReadSkyCamera(&sc);
-        // Interiors have their own coordinates: mapped onto DDDA's world they sent the party
-        // to ungenerated ground (leaps, flicker, a fall into the void; 2026-10-02). Until
-        // interiors get their own ground, the link pauses: the party waits outside (the
-        // bridge's "hold" keeps it in place) and joins the player again on the way out.
-        static bool wasInterior = false;
-        bool interior = ok && terrain.on && PlayerInInterior();
-        if (interior != wasInterior) {
-            wasInterior = interior;
-            Log("player %s an interior: link %s", interior ? "entered" : "left", interior ? "paused" : "resumed");
-            QueueConsole(interior ? "[DD] Interior: the party waits outside." : "[DD] Outside again: the party rejoins you.");
-        }
-        if (interior) ok = false;
+        if (interior && !innerReady) ok = false;
         bool arisen;
         float ddPos[3];
         AcquireSRWLockShared(&g_ddLock);
