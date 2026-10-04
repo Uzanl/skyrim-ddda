@@ -15,6 +15,11 @@
 // Water: a pawn whose feet are under a river's or lake's surface makes ripples there
 // (TESWaterSystem::AddRipple), like an actor wading.
 //
+// Ripple spy (test): every call site of TESWaterSystem::AddRipple in SkyrimSE.exe goes
+// through LoggedAddRipple, which passes the call on unchanged; with a line "spy" in
+// DDDAGhosts_test.txt it logs how Skyrim makes ripples (who, where, scale, how often),
+// to copy the Dragonborn's wading for the pawns.
+//
 // Live collision export (havok_export.h): Skyrim's collision of every loaded exterior cell
 // goes to files that tools/terrain/stream.py turns into DDDA ground.
 //
@@ -28,7 +33,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
+#include <utility>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -208,6 +215,96 @@ float GroundZ(float x, float y, float fallback) {
     return hasLand ? land : fallback;
 }
 
+// --- Ripple spy ---------------------------------------------------------------------
+
+using AddRippleFn = void (*)(RE::TESWaterSystem*, const RE::NiPoint3&, float);
+std::atomic<bool> g_spy{false};
+struct SpySite {
+    std::uintptr_t site = 0;
+    AddRippleFn original = nullptr;
+    std::uint32_t calls = 0, nearPlayer = 0;
+    float minScale = 1e9f, maxScale = 0, minDist = 1e9f;
+};
+std::array<SpySite, 32> g_spySites;
+int g_spyCount = 0;
+std::chrono::steady_clock::time_point g_spyLastNear;
+
+template <int K>
+void LoggedAddRipple(RE::TESWaterSystem* self, const RE::NiPoint3& pos, float scale) {
+    SpySite& s = g_spySites[K];
+    if (g_spy) {
+        ++s.calls;
+        s.minScale = (std::min)(s.minScale, scale);
+        s.maxScale = (std::max)(s.maxScale, scale);
+        if (auto* pl = RE::PlayerCharacter::GetSingleton()) {
+            const float d = pl->GetPosition().GetDistance(pos);
+            s.minDist = (std::min)(s.minDist, d);
+            if (d < 300.0f) {
+                ++s.nearPlayer;
+                const auto now = std::chrono::steady_clock::now();
+                static int printed = 0;
+                if (printed < 40) {
+                    ++printed;
+                    spdlog::info("spy: site {} +{:X} ripple at ({:.0f}, {:.0f}, {:.0f}) scale {:.3f}, {:.0f} from the player, "
+                                 "{:.3f} s after the last near one",
+                                 K, s.site - reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)), pos.x, pos.y, pos.z, scale, d,
+                                 std::chrono::duration<float>(now - g_spyLastNear).count());
+                }
+                g_spyLastNear = now;
+            }
+        }
+    }
+    s.original(self, pos, scale);
+}
+
+template <int... K>
+constexpr std::array<void*, sizeof...(K)> SpyHooks(std::integer_sequence<int, K...>) {
+    return {reinterpret_cast<void*>(&LoggedAddRipple<K>)...};
+}
+
+// Finds every `call rel32` to AddRipple in the executable's code and routes it through
+// LoggedAddRipple<k>. Called from SKSE_PLUGIN_LOAD, before the game runs.
+void InstallRippleSpy() {
+    const REL::Relocation<std::uintptr_t> addRipple{ RELOCATION_ID(31410, 32217) };
+    const std::uintptr_t target = addRipple.address();
+    auto* base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    static const auto hooks = SpyHooks(std::make_integer_sequence<int, 32>{});
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sec) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        std::uint8_t* p = base + sec->VirtualAddress;
+        const std::size_t n = sec->Misc.VirtualSize;
+        for (std::size_t k = 0; k + 5 <= n; ++k) {
+            if (p[k] != 0xE8) continue;
+            std::int32_t rel;
+            std::memcpy(&rel, p + k + 1, 4);
+            const std::uintptr_t site = reinterpret_cast<std::uintptr_t>(p + k);
+            if (site + 5 + rel != target) continue;
+            if (g_spyCount >= static_cast<int>(g_spySites.size())) break;
+            SpySite& s = g_spySites[g_spyCount];
+            s.site = site;
+            s.original = reinterpret_cast<AddRippleFn>(
+                REL::GetTrampoline().write_call<5>(site, reinterpret_cast<std::uintptr_t>(hooks[g_spyCount])));
+            spdlog::info("spy: AddRipple call site {} at +{:X}", g_spyCount, site - reinterpret_cast<std::uintptr_t>(base));
+            ++g_spyCount;
+        }
+    }
+    spdlog::info("spy: {} AddRipple call sites hooked", g_spyCount);
+}
+
+void SpyReport() {
+    if (!g_spy) return;
+    for (int k = 0; k < g_spyCount; ++k) {
+        SpySite& s = g_spySites[k];
+        if (!s.calls) continue;
+        spdlog::info("spy: site {} +{:X}: {} calls in 2 s ({} near the player), scale {:.3f}-{:.3f}, nearest {:.0f}", k,
+                     s.site - reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)), s.calls, s.nearPlayer, s.minScale, s.maxScale, s.minDist);
+        s = SpySite{s.site, s.original};
+    }
+}
+
 // --- Ground publishing -------------------------------------------------------------
 
 bridge::Ground* g_ground = nullptr;
@@ -282,6 +379,11 @@ void Update() {
     if (ReadLink(&st, &an)) PublishGround(st, an);
     UpdateGhosts();
     UpdateRipples();
+    static auto lastSpy = std::chrono::steady_clock::now();
+    if (std::chrono::steady_clock::now() - lastSpy > std::chrono::seconds(2)) {
+        lastSpy = std::chrono::steady_clock::now();
+        SpyReport();
+    }
 }
 
 // Ripples where the pawns wade: the cell's water height at the pawn (the cell's own lookup,
@@ -386,6 +488,7 @@ void PollGhostMode() {
         return std::filesystem::path(buf).parent_path() / L"DDDAGhosts_test.txt";
     }();
     int mode = 0;
+    bool spy = false;
     float scale = 0.3f, every = 0.3f;
     FILE* f = nullptr;
     if (_wfopen_s(&f, path.c_str(), L"r") == 0 && f) {
@@ -395,6 +498,7 @@ void PollGhostMode() {
             if (first && std::strncmp(line, "visible", 7) == 0) mode = 1;
             if (first && std::strncmp(line, "invisible", 9) == 0) mode = 2;
             first = false;
+            if (std::strncmp(line, "spy", 3) == 0) spy = true;
             float a, b;
             if (sscanf_s(line, "ripple %f %f", &a, &b) == 2 && a > 0 && a < 10 && b >= 0.02f && b < 10) {
                 scale = a;
@@ -403,6 +507,7 @@ void PollGhostMode() {
         }
         fclose(f);
     }
+    if (spy != g_spy.exchange(spy)) spdlog::info("spy {}", spy ? "on" : "off");
     if (scale != g_rippleScale.exchange(scale) || every != g_rippleEvery.exchange(every))
         spdlog::info("ripples: scale {} every {} s while walking", scale, every);
     if (mode != g_ghostMode.exchange(mode)) spdlog::info("ghost mode {}", mode == 2 ? "invisible" : mode ? "visible" : "off");
@@ -464,7 +569,7 @@ SKSE_PLUGIN_VERSION = []() {
 }();
 
 SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* skse) {
-    SKSE::Init(skse);
+    SKSE::Init(skse, {.trampoline = true, .trampolineSize = 32 * 16});
     SetupLog();
     spdlog::info("DDDAGhosts loading on runtime {}", REX::FModule::GetExecutingModule().GetFileVersion().string());
     if (!SKSE::GetMessagingInterface()->RegisterListener(OnMessage)) {
@@ -472,6 +577,7 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* skse) {
         return false;
     }
     havok_export::Reset();
+    InstallRippleSpy();
     std::thread(UpdateLoop).detach();
     return true;
 }

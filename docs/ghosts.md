@@ -84,6 +84,14 @@ water sounds), and does that still work when they are invisible?
   simulation piles up strong, frequent ripples). Now scale 0.3 every 0.3 s walking (half
   the scale, every 1.2 s standing), tunable live with a line `ripple SCALE SECONDS` in
   `DDDAGhosts_test.txt`. Not seen yet.
+- **Ripple spy (built, not run):** to copy how Skyrim ripples around the wading
+  Dragonborn, DDDAGhosts finds every `call rel32` to AddRipple in SkyrimSE.exe at load and
+  routes it through `LoggedAddRipple<k>` (SKSE trampoline), which passes the call on.
+  With a line `spy` in `DDDAGhosts_test.txt` the log lists the call sites at load, every
+  call within 300 units of the player (position, scale, time since the last one; first
+  40) and a per-site summary every 2 s. If the player's wading makes no AddRipple calls,
+  it goes through another path (TESWaterSystem keeps `wadingWaterData` and
+  `actorsInWater` per actor).
 - Also in the video: pawns standing in the river are drawn whole over the water (no
   submerged part): Skyrim's water is not in the depth the add-on tests against.
 
