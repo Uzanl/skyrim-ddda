@@ -1833,6 +1833,16 @@ bool PollCameraCmd() {
     static bool lastActive = false;
     CamOverride o = {};
     const bridge::CameraCmd* c = g_camCmd;
+    // Plain DDDA (no bridge session) never takes Skyrim's commands: without the overlay its
+    // ground is DDDA's own, and a terrain link put the party over the void (2026-10-03).
+    if (!g_session) {
+        static bool told = false;
+        if (!told && c && c->magic == bridge::kCamMagic && (c->flags & bridge::kCamOverride)) {
+            told = true;
+            Log("Skyrim is sending commands, but DDDA was not started by play_bridge.bat: ignored (plain game)");
+        }
+        c = nullptr;
+    }
     if (c && c->magic == bridge::kCamMagic && c->version == bridge::kCamVersion) {
         bridge::CameraCmd s = {};
         bool ok = SnapshotCameraCmd(&s);

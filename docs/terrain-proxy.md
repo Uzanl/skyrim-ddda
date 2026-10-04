@@ -336,7 +336,10 @@ Now:
   them all (and `stream_state.json`).
 - `play_bridge.bat` writes `ddda_session.txt` (line 1: the overlay folder) next to
   DDDA.exe and starts DDDA through Steam. The DLL reads and deletes it in DllMain
-  (ignored after 5 minutes). Without it: no streamer, no overlay, "hold" ignored.
+  (ignored after 5 minutes). Without it: no streamer, no overlay, "hold" ignored, and
+  Skyrim's commands are ignored (logged once). Until 2026-10-03 a DDDA started from Steam
+  still took the terrain link: the party was moved over DDDA's own ground, which does not
+  match Skyrim's, and the pawns fell into the void.
 - In a session, `src/ddda_bridge/file_overlay.cpp` replaces DDDA.exe's `CreateFileW` and
   `CreateFileA` imports: an open for reading of a path containing `nativePC\` gets
   `<overlay>\nativePC\...` when that file exists; writes and other files are unchanged.
