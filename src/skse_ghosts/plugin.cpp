@@ -287,10 +287,13 @@ void Update() {
 // Ripples where the pawns wade: the cell's water height at the pawn (the cell's own lookup,
 // as SkyCraft does: TES::GetWaterHeight is not in 1.7.104's address library). Moving pawns
 // ripple often, standing ones now and then, as Skyrim's actors do.
+// Scale 1 every 0.15 s left long straight streaks behind walking pawns (the user's video,
+// 2026-10-03): the water simulation piles the rings up. Tunable live with a line
+// "ripple SCALE SECONDS" in DDDAGhosts_test.txt (standing pawns: half of each, every 4x).
 constexpr float kWadeDepth = 160.0f;      // Skyrim units: deeper than this, no ripples (swimming is not handled)
-constexpr float kRippleMoving = 0.15f;    // s between ripples while walking
-constexpr float kRippleStill = 1.0f;      // s between ripples standing
 constexpr float kMovingSpeed = 20.0f;     // Skyrim units/s
+std::atomic<float> g_rippleScale{0.3f};   // AddRipple scale while walking
+std::atomic<float> g_rippleEvery{0.3f};   // s between ripples while walking
 
 void UpdateRipples() {
     std::array<RE::NiPoint3, 3> pos;
@@ -316,9 +319,10 @@ void UpdateRipples() {
         if (!cell || !cell->GetWaterHeight(p, h) || !std::isfinite(h) || h < -1.0e6f) continue;
         if (p.z > h || p.z < h - kWadeDepth) continue;
         const bool moving = speed > kMovingSpeed;
-        if (std::chrono::duration<float>(now - lastRipple[i]).count() < (moving ? kRippleMoving : kRippleStill)) continue;
+        const float every = g_rippleEvery, scale = g_rippleScale;
+        if (std::chrono::duration<float>(now - lastRipple[i]).count() < (moving ? every : every * 4)) continue;
         lastRipple[i] = now;
-        water->AddRipple(RE::NiPoint3{p.x, p.y, h}, moving ? 1.0f : 0.5f);
+        water->AddRipple(RE::NiPoint3{p.x, p.y, h}, moving ? scale : scale * 0.5f);
         if (!logged) {
             logged = true;
             spdlog::info("ripple: pawn {} wading at ({:.0f}, {:.0f}), feet {:.0f} under the water at {:.0f}", i, p.x, p.y,
@@ -382,15 +386,25 @@ void PollGhostMode() {
         return std::filesystem::path(buf).parent_path() / L"DDDAGhosts_test.txt";
     }();
     int mode = 0;
+    float scale = 0.3f, every = 0.3f;
     FILE* f = nullptr;
     if (_wfopen_s(&f, path.c_str(), L"r") == 0 && f) {
-        char line[32] = {};
-        if (fgets(line, sizeof(line), f)) {
-            if (std::strncmp(line, "visible", 7) == 0) mode = 1;
-            if (std::strncmp(line, "invisible", 9) == 0) mode = 2;
+        char line[64] = {};
+        bool first = true;
+        while (fgets(line, sizeof(line), f)) {
+            if (first && std::strncmp(line, "visible", 7) == 0) mode = 1;
+            if (first && std::strncmp(line, "invisible", 9) == 0) mode = 2;
+            first = false;
+            float a, b;
+            if (sscanf_s(line, "ripple %f %f", &a, &b) == 2 && a > 0 && a < 10 && b >= 0.02f && b < 10) {
+                scale = a;
+                every = b;
+            }
         }
         fclose(f);
     }
+    if (scale != g_rippleScale.exchange(scale) || every != g_rippleEvery.exchange(every))
+        spdlog::info("ripples: scale {} every {} s while walking", scale, every);
     if (mode != g_ghostMode.exchange(mode)) spdlog::info("ghost mode {}", mode == 2 ? "invisible" : mode ? "visible" : "off");
 }
 

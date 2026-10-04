@@ -28,7 +28,7 @@ Skyrim shows the result. The two processes talk through shared memory
 | Bridge session only (`play_bridge.bat`): DDDA from Steam stays the plain game; generated tiles in an overlay, the game's files never written | overlay verified in game 2026-10-03 (log: session started, 59 tiles read from the overlay around a link); plain start from Steam not checked in game yet |
 | Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
 | Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou"); bar lowered, narrower, 7 px thick, 24 cm over each pawn's head joint read from the skeleton every frame (posture counts): verified in game 2026-10-03 ("está ok agora") |
-| Water reacting to the pawns in Skyrim's rivers | ghosts did not make the water react (2026-10-03); direct ripples (`AddRipple` at wading pawns) built, not tested (docs/ghosts.md, "Water test") |
+| Water reacting to the pawns in Skyrim's rivers | ghosts did not make the water react (2026-10-03); direct ripples (`AddRipple` at wading pawns) verified in game 2026-10-03 (video), but they streaked; softer ones built, not seen (docs/ghosts.md, "Water test") |
 | Pawns fall into the void when the save is away from the link spot | open bug, reported 2026-10-03; analysis in docs/party-in-terrain-mode.md |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |

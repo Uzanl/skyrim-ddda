@@ -79,6 +79,13 @@ water sounds), and does that still work when they are invisible?
   it); with the feet 0-160 units under the surface, `TESWaterSystem::AddRipple(surface
   point, scale)` (AE ID 32217, exposed by CommonLibSSE): every 0.15 s at scale 1 while
   walking, every 1 s at 0.5 standing. The log says `ripple:` at the first one.
+- **Ripples work** (the user's video, 2026-10-03 21:27: "funciona"), but looked odd: long
+  straight parallel streaks behind the walking pawns instead of rings (the water
+  simulation piles up strong, frequent ripples). Now scale 0.3 every 0.3 s walking (half
+  the scale, every 1.2 s standing), tunable live with a line `ripple SCALE SECONDS` in
+  `DDDAGhosts_test.txt`. Not seen yet.
+- Also in the video: pawns standing in the river are drawn whole over the water (no
+  submerged part): Skyrim's water is not in the depth the add-on tests against.
 
 ## Skeleton in Skyrim (idea, 2026-10-03)
 
