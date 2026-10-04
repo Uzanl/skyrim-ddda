@@ -92,6 +92,11 @@ water sounds), and does that still work when they are invisible?
   40) and a per-site summary every 2 s. If the player's wading makes no AddRipple calls,
   it goes through another path (TESWaterSystem keeps `wadingWaterData` and
   `actorsInWater` per actor).
+- Spy run 1 (21:37-21:39): 4 call sites hooked (+524BC4, +524DD0, +66AD49, +800797); the
+  user swam in the river and **none of them was called** near the player. Wading and
+  swimming ripples do not go through AddRipple calls. Spy 2 (built, not run): also `jmp`
+  sites, and every 2 s the water system's `actorsInWater` (names, player marked),
+  `wadingWaterData` size, `maxActorDisplacement` and `timeSinceLastRipplePlaced`.
 - Also in the video: pawns standing in the river are drawn whole over the water (no
   submerged part): Skyrim's water is not in the depth the add-on tests against.
 

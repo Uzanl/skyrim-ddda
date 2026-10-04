@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <string>
 #include <utility>
 #include <atomic>
 #include <chrono>
@@ -277,7 +278,7 @@ void InstallRippleSpy() {
         std::uint8_t* p = base + sec->VirtualAddress;
         const std::size_t n = sec->Misc.VirtualSize;
         for (std::size_t k = 0; k + 5 <= n; ++k) {
-            if (p[k] != 0xE8) continue;
+            if (p[k] != 0xE8 && p[k] != 0xE9) continue;  // call rel32 or jmp rel32 (tail call)
             std::int32_t rel;
             std::memcpy(&rel, p + k + 1, 4);
             const std::uintptr_t site = reinterpret_cast<std::uintptr_t>(p + k);
@@ -285,9 +286,12 @@ void InstallRippleSpy() {
             if (g_spyCount >= static_cast<int>(g_spySites.size())) break;
             SpySite& s = g_spySites[g_spyCount];
             s.site = site;
-            s.original = reinterpret_cast<AddRippleFn>(
-                REL::GetTrampoline().write_call<5>(site, reinterpret_cast<std::uintptr_t>(hooks[g_spyCount])));
-            spdlog::info("spy: AddRipple call site {} at +{:X}", g_spyCount, site - reinterpret_cast<std::uintptr_t>(base));
+            const bool jump = p[k] == 0xE9;
+            const auto hook = reinterpret_cast<std::uintptr_t>(hooks[g_spyCount]);
+            s.original = reinterpret_cast<AddRippleFn>(jump ? REL::GetTrampoline().write_jmp<5>(site, hook)
+                                                            : REL::GetTrampoline().write_call<5>(site, hook));
+            spdlog::info("spy: AddRipple {} site {} at +{:X}", jump ? "jump" : "call", g_spyCount,
+                         site - reinterpret_cast<std::uintptr_t>(base));
             ++g_spyCount;
         }
     }
@@ -296,6 +300,20 @@ void InstallRippleSpy() {
 
 void SpyReport() {
     if (!g_spy) return;
+    // The other path: Skyrim's per-actor wading data and its list of actors in water.
+    if (auto* w = RE::TESWaterSystem::GetSingleton()) {
+        std::string names;
+        for (auto it = w->actorsInWater.begin(); it != w->actorsInWater.end(); ++it) {
+            auto a = (*it).get();
+            names += a ? std::string(a->GetDisplayFullName() ? a->GetDisplayFullName() : "?") : std::string("-");
+            names += a && a->IsPlayerRef() ? "(player) " : " ";
+        }
+        auto* pl = RE::PlayerCharacter::GetSingleton();
+        spdlog::info("spy: water: actorsInWater {} [{}], wadingWaterData {}, maxActorDisplacement {}, "
+                     "timeSinceLastRipplePlaced {:.2f}, player in water {}",
+                     w->actorsInWater.size(), names, w->wadingWaterData.size(), w->maxActorDisplacement,
+                     w->timeSinceLastRipplePlaced, pl && pl->IsInWater());
+    }
     for (int k = 0; k < g_spyCount; ++k) {
         SpySite& s = g_spySites[k];
         if (!s.calls) continue;
