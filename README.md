@@ -33,8 +33,20 @@ Skyrim shows the result. The two processes talk through shared memory
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
-## Where we stopped (2026-10-03, evening)
+## Where we stopped (2026-10-03, night)
 
+- **Water (not tested):** ghosts (Skyrim actors at the pawns, visible test clones) followed
+  the pawns but the river did not react; with AI on they crashed Skyrim. They are off
+  again. Ripples are now made directly where a pawn wades (`TESWaterSystem::AddRipple`),
+  no actor needed. To check: walk the pawns into Riverwood's river; `DDDAGhosts.log`
+  says `ripple:` at the first one. [docs/ghosts.md](docs/ghosts.md), "Water test".
+- **DDDA from Steam ignores Skyrim** (built, installed). Started without
+  `play_bridge.bat`, DDDA still took the terrain link and moved the party over its own
+  ground, and the pawns fell into the void. Always start it with `play_bridge.bat`.
+- **Pawn labels at each pawn's head** (verified in game, "está ok agora"): the bar sits
+  24 cm over the highest head joint, read from DDDA's skeleton every frame, so height,
+  posture and crouching count. The skeleton is `[char+0x364]`
+  ([docs/ddda-memory.md](docs/ddda-memory.md), "Skeleton").
 - **Open bug (the user, parked):** if the Arisen is not where the save was made, pawns
   may fall into the void and die. Likely cause and fixes in
   [docs/party-in-terrain-mode.md](docs/party-in-terrain-mode.md), "Open bug".
@@ -80,8 +92,12 @@ Next, in order:
 2. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
    refunded and mirrored to their HP, then DDDA stand-ins for Skyrim enemies with damage
    going through Skyrim's hit pipeline. Pawn arrows and spells must also be drawn
-   (isolate keeps only party meshes).
+   (isolate keeps only party meshes). Idea from the user: Skyrim collision capsules on
+   each pawn's DDDA skeleton (bones read live), so Skyrim's hits and arrows land on the
+   real body; see docs/ghosts.md, "Skeleton in Skyrim". Ghosts with AI on crashed
+   Skyrim: install a crash logger (Crash Logger SSE) before trying that again.
 3. Shadows, post-processing match, point lights ([docs/lighting.md](docs/lighting.md)).
+   Labels could shrink with distance (they overlap when pawns are far and close together).
 4. Performance at full resolution is not measured (each frame copies colour and mask, 2 x
    8 MB, through the CPU). Options: a 1-byte mask, or reading back only the pawns' rect.
 

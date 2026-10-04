@@ -80,6 +80,18 @@ water sounds), and does that still work when they are invisible?
   point, scale)` (AE ID 32217, exposed by CommonLibSSE): every 0.15 s at scale 1 while
   walking, every 1 s at 0.5 standing. The log says `ripple:` at the first one.
 
+## Skeleton in Skyrim (idea, 2026-10-03)
+
+The user's idea: give each pawn its skeleton "with physics" in Skyrim. The DDDA bridge
+already reads every joint's world position each frame (`[char+0x364]`, 65-69 joints,
+docs/ddda-memory.md "Skeleton"). Kinematic Havok capsules in Skyrim's world, one per
+bone pair, placed from those joints, would give Skyrim a body that matches the pawn's
+pose: weapons, arrows and spells hit where the pawn really is, and loose objects get
+pushed. A better hit target for combat than a standing actor; it does not by itself make
+an actor Skyrim's AI can target (the ghost does that). Not started. Copying DDDA's
+animation onto a Skyrim skeleton was ruled out: the skeletons differ, and an invisible
+body gains nothing from it.
+
 ## Neutralising DDDA's world (2026-10-01)
 
 The user asked for the robust route first: falls into DDDA's void, DDDA walls and
