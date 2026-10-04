@@ -173,7 +173,10 @@ RE::Actor* SpawnGhost(int role) {
     auto* actor = ref ? ref->As<RE::Actor>() : nullptr;
     if (!actor) return nullptr;
     actor->SetDisplayName(kGhostName, true);
-    actor->EnableAI(false);
+    // AI on: an actor without it is never updated, so its body and physics capsule stayed
+    // where it spawned and water never saw it (2026-10-03). The player's base has no AI
+    // packages, and the ghost is placed every frame anyway.
+    actor->EnableAI(true);
     spdlog::info("spawned ghost {:08X} for pawn role {}", actor->GetFormID(), role);
     return actor;
 }
@@ -303,7 +306,22 @@ void UpdateGhosts() {
             if (!ghost) continue;
         }
         const RE::NiPoint3& p = pos[i];
+        // Body and physics capsule follow too, with the pawn's velocity, so Skyrim sees an
+        // actor walking (wading ripples, splashes) rather than one teleported each frame.
+        static std::array<RE::NiPoint3, 3> last;
+        static std::array<std::chrono::steady_clock::time_point, 3> lastAt;
+        const auto now = std::chrono::steady_clock::now();
+        const float dt = std::chrono::duration<float>(now - lastAt[i]).count();
+        RE::NiPoint3 v{};
+        if (dt > 0.001f && dt < 0.25f) v = (p - last[i]) / dt;
+        last[i] = p;
+        lastAt[i] = now;
         ghost->SetPosition(p, true);
+        ghost->Update3DPosition(true);
+        if (auto* cc = ghost->GetCharController()) {
+            const float s = RE::bhkWorld::GetWorldScale();
+            cc->SetLinearVelocityImpl(RE::hkVector4(v.x * s, v.y * s, v.z * s, 0.0f));
+        }
         if (ghost->Is3DLoaded()) ghost->SetAlpha(mode == 2 ? 0.0f : 1.0f);
         if (report) {
             auto now = ghost->GetPosition();

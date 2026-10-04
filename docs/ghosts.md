@@ -65,8 +65,10 @@ water sounds), and does that still work when they are invisible?
   not the old anchor mapping. Height: the pawn's own feet (on the river bed under water).
 - Invisible = `Actor::SetAlpha(0)` (not the invisibility effect: enemies would ignore it).
 - `DDDAGhosts.log` prints each ghost every 2 s with `in water` (`TESObjectREFR::IsInWater`).
-- Expected risk: ghosts are teleported each frame (`SetPosition`), so Skyrim may see no
-  movement and make no wading ripples; if so, try moving them with velocity or AI.
+- First try (21:00): the log followed the pawns (`in water true` in the river), but the
+  bodies stayed where they spawned, at the door, and the water did nothing. With AI off,
+  `SetPosition` moved only the reference's data. Now: AI on, `Update3DPosition(true)` and
+  the character controller gets the pawn's velocity every frame. Not tested yet.
 
 ## Neutralising DDDA's world (2026-10-01)
 
