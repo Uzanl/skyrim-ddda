@@ -28,18 +28,18 @@ Skyrim shows the result. The two processes talk through shared memory
 | Bridge session only (`play_bridge.bat`): DDDA from Steam stays the plain game; generated tiles in an overlay, the game's files never written | overlay verified in game 2026-10-03 (log: session started, 59 tiles read from the overlay around a link); plain start from Steam not checked in game yet |
 | Interiors: the party follows inside (the interior's collision in an "arena" of DDDA's map) | done, verified in game 2026-10-03 (three Riverwood houses, "funcionou ok"); entering takes 4-6 s, leaving is immediate |
 | Pawn labels in Skyrim (name, health bar, party colour, like DDDA's) | done, verified in game 2026-10-03 ("funcionou"); bar lowered, narrower, 7 px thick, 24 cm over each pawn's head joint read from the skeleton every frame (posture counts): verified in game 2026-10-03 ("está ok agora") |
-| Water reacting to the pawns in Skyrim's rivers | ghosts did not make the water react (2026-10-03); direct ripples (`AddRipple` at wading pawns) verified in game 2026-10-03 (video), but they streaked; softer ones built, not seen (docs/ghosts.md, "Water test") |
+| Water reacting to the pawns in Skyrim's rivers | ghosts did not make the water react (2026-10-03); direct ripples (`AddRipple` at wading pawns, Skyrim's own scale found with a spy): verified in game 2026-10-03 ("funcionou bem") (docs/ghosts.md, "Water test") |
 | Pawns fall into the void when the save is away from the link spot | open bug, reported 2026-10-03; analysis in docs/party-in-terrain-mode.md |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
 
 ## Where we stopped (2026-10-03, night)
 
-- **Water (not tested):** ghosts (Skyrim actors at the pawns, visible test clones) followed
-  the pawns but the river did not react; with AI on they crashed Skyrim. They are off
-  again. Ripples are now made directly where a pawn wades (`TESWaterSystem::AddRipple`),
-  no actor needed. To check: walk the pawns into Riverwood's river; `DDDAGhosts.log`
-  says `ripple:` at the first one. [docs/ghosts.md](docs/ghosts.md), "Water test".
+- **Water: works** ("funcionou bem"). Ghosts (Skyrim actors at the pawns) followed
+  the pawns but the river did not react, and with AI on they crashed Skyrim; they are off.
+  Ripples are made directly where a pawn wades (`TESWaterSystem::AddRipple`) with the
+  scale Skyrim uses for the player (0.01 standing, found by hooking Skyrim's own calls).
+  Pawns in the river are still drawn whole over the water (no submerged part). [docs/ghosts.md](docs/ghosts.md), "Water test".
 - **DDDA from Steam ignores Skyrim** (built, installed). Started without
   `play_bridge.bat`, DDDA still took the terrain link and moved the party over its own
   ground, and the pawns fell into the void. Always start it with `play_bridge.bat`.

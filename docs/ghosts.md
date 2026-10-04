@@ -97,7 +97,12 @@ water sounds), and does that still work when they are invisible?
   the water did: site 0 (+524BC4), at the player's feet, **scale 0.010, every 1.3-2.1 s**.
   So our scale 1 (then 0.3) was 30-100 times Skyrim's, hence the streaks. Pawns now copy
   it standing (0.01 every 1.5 s) and get 0.02 every 0.1 s walking (a guess, tunable).
-  Wading and swimming wakes go through another path. Spy 2 (built, not run): also `jmp`
+  Wading and swimming wakes go through another path.
+- **Ripples verified in game** (the user, 2026-10-03 ~22:00: "funcionou bem") with those
+  values. Spy 2: while the player was in the water, `wadingWaterData` held 1 entry (the
+  player's) and `actorsInWater` stayed empty; so the walking wake is per-actor
+  `WadingWaterData` (layout unknown). Not needed now. The spy is off (`spy` line removed);
+  its hooks stay installed and pass every call on. Spy 2 (built, not run): also `jmp`
   sites, and every 2 s the water system's `actorsInWater` (names, player marked),
   `wadingWaterData` size, `maxActorDisplacement` and `timeSinceLastRipplePlaced`.
 - Also in the video: pawns standing in the river are drawn whole over the water (no
