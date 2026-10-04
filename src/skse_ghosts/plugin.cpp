@@ -407,13 +407,16 @@ void Update() {
 // Ripples where the pawns wade: the cell's water height at the pawn (the cell's own lookup,
 // as SkyCraft does: TES::GetWaterHeight is not in 1.7.104's address library). Moving pawns
 // ripple often, standing ones now and then, as Skyrim's actors do.
-// Scale 1 every 0.15 s left long straight streaks behind walking pawns (the user's video,
-// 2026-10-03): the water simulation piles the rings up. Tunable live with a line
-// "ripple SCALE SECONDS" in DDDAGhosts_test.txt (standing pawns: half of each, every 4x).
+// Skyrim itself (ripple spy, 2026-10-03): a Dragonborn standing in water gets AddRipple at
+// its feet with scale 0.01 every 1.3-2 s; walking and swimming make no AddRipple calls
+// (another path). Scale 1 every 0.15 s had left long straight streaks. Standing pawns copy
+// Skyrim; walking ones get small frequent ripples, tunable live with a line
+// "ripple SCALE SECONDS" in DDDAGhosts_test.txt.
 constexpr float kWadeDepth = 160.0f;      // Skyrim units: deeper than this, no ripples (swimming is not handled)
 constexpr float kMovingSpeed = 20.0f;     // Skyrim units/s
-std::atomic<float> g_rippleScale{0.3f};   // AddRipple scale while walking
-std::atomic<float> g_rippleEvery{0.3f};   // s between ripples while walking
+constexpr float kStillScale = 0.01f, kStillEvery = 1.5f;  // as Skyrim does for the player
+std::atomic<float> g_rippleScale{0.02f};  // AddRipple scale while walking
+std::atomic<float> g_rippleEvery{0.1f};   // s between ripples while walking
 
 void UpdateRipples() {
     std::array<RE::NiPoint3, 3> pos;
@@ -440,9 +443,9 @@ void UpdateRipples() {
         if (p.z > h || p.z < h - kWadeDepth) continue;
         const bool moving = speed > kMovingSpeed;
         const float every = g_rippleEvery, scale = g_rippleScale;
-        if (std::chrono::duration<float>(now - lastRipple[i]).count() < (moving ? every : every * 4)) continue;
+        if (std::chrono::duration<float>(now - lastRipple[i]).count() < (moving ? every : kStillEvery)) continue;
         lastRipple[i] = now;
-        water->AddRipple(RE::NiPoint3{p.x, p.y, h}, moving ? scale : scale * 0.5f);
+        water->AddRipple(RE::NiPoint3{p.x, p.y, h}, moving ? scale : kStillScale);
         if (!logged) {
             logged = true;
             spdlog::info("ripple: pawn {} wading at ({:.0f}, {:.0f}), feet {:.0f} under the water at {:.0f}", i, p.x, p.y,
@@ -507,7 +510,7 @@ void PollGhostMode() {
     }();
     int mode = 0;
     bool spy = false;
-    float scale = 0.3f, every = 0.3f;
+    float scale = 0.02f, every = 0.1f;
     FILE* f = nullptr;
     if (_wfopen_s(&f, path.c_str(), L"r") == 0 && f) {
         char line[64] = {};
