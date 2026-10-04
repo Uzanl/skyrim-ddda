@@ -71,9 +71,14 @@ water sounds), and does that still work when they are invisible?
 - Second try (21:06): AI on, `Update3DPosition(true)` and the pawn's velocity on the
   character controller. Skyrim crashed about 20 s in, right after the ghosts were deleted
   when the terrain link dropped. No crash logger is installed, so the cause is unknown.
-- Third try (built, not tested): AI off again, `SetPosition(p, true)` plus
-  `Update3DPosition(true)` each frame, no velocity. If the water does not react, AI comes
-  back with a crash logger installed.
+- Third try (21:2x): AI off, `SetPosition(p, true)` plus `Update3DPosition(true)`. The
+  ghosts followed the pawns (the user saw them), but the water did nothing. Ghosts are
+  off again (`DDDAGhosts_test.txt` = off).
+- **Direct ripples (built, not tested):** no actor at all. Every update, for each pawn,
+  the cell's water height at its feet (`TESObjectCELL::GetWaterHeight`, as SkyCraft reads
+  it); with the feet 0-160 units under the surface, `TESWaterSystem::AddRipple(surface
+  point, scale)` (AE ID 32217, exposed by CommonLibSSE): every 0.15 s at scale 1 while
+  walking, every 1 s at 0.5 standing. The log says `ripple:` at the first one.
 
 ## Neutralising DDDA's world (2026-10-01)
 

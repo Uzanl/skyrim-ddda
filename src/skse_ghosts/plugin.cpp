@@ -12,6 +12,9 @@
 // camera it was made from). Off unless DDDAGhosts_test.txt (next to this DLL) says
 // "visible" or "invisible" (alpha 0).
 //
+// Water: a pawn whose feet are under a river's or lake's surface makes ripples there
+// (TESWaterSystem::AddRipple), like an actor wading.
+//
 // Live collision export (havok_export.h): Skyrim's collision of every loaded exterior cell
 // goes to files that tools/terrain/stream.py turns into DDDA ground.
 //
@@ -28,7 +31,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <cstring>
 #include <filesystem>
 #include <thread>
@@ -260,6 +265,7 @@ void Skipped(const char* why) {
 }
 
 void UpdateGhosts();
+void UpdateRipples();
 
 void Update() {
     bridge::State st;
@@ -275,6 +281,50 @@ void Update() {
     }
     if (ReadLink(&st, &an)) PublishGround(st, an);
     UpdateGhosts();
+    UpdateRipples();
+}
+
+// Ripples where the pawns wade: the cell's water height at the pawn (the cell's own lookup,
+// as SkyCraft does: TES::GetWaterHeight is not in 1.7.104's address library). Moving pawns
+// ripple often, standing ones now and then, as Skyrim's actors do.
+constexpr float kWadeDepth = 160.0f;      // Skyrim units: deeper than this, no ripples (swimming is not handled)
+constexpr float kRippleMoving = 0.15f;    // s between ripples while walking
+constexpr float kRippleStill = 1.0f;      // s between ripples standing
+constexpr float kMovingSpeed = 20.0f;     // Skyrim units/s
+
+void UpdateRipples() {
+    std::array<RE::NiPoint3, 3> pos;
+    uint32_t present = 0;
+    auto* water = RE::TESWaterSystem::GetSingleton();
+    auto* tes = RE::TES::GetSingleton();
+    auto* player = RE::PlayerCharacter::GetSingleton();
+    auto* home = player ? player->GetParentCell() : nullptr;
+    if (!water || !tes || !home || !ReadPawns(pos, present)) return;
+    static std::array<RE::NiPoint3, 3> last;
+    static std::array<std::chrono::steady_clock::time_point, 3> lastAt, lastRipple;
+    static bool logged = false;
+    const auto now = std::chrono::steady_clock::now();
+    for (int i = 0; i < 3; ++i) {
+        if (!(present & (1u << i))) continue;
+        const RE::NiPoint3& p = pos[i];
+        const float dt = std::chrono::duration<float>(now - lastAt[i]).count();
+        const float speed = dt > 0.001f && dt < 1.0f ? p.GetDistance(last[i]) / dt : 0.0f;
+        last[i] = p;
+        lastAt[i] = now;
+        auto* cell = home->IsInteriorCell() ? home : tes->GetCell(p);
+        float h = -(std::numeric_limits<float>::max)();
+        if (!cell || !cell->GetWaterHeight(p, h) || !std::isfinite(h) || h < -1.0e6f) continue;
+        if (p.z > h || p.z < h - kWadeDepth) continue;
+        const bool moving = speed > kMovingSpeed;
+        if (std::chrono::duration<float>(now - lastRipple[i]).count() < (moving ? kRippleMoving : kRippleStill)) continue;
+        lastRipple[i] = now;
+        water->AddRipple(RE::NiPoint3{p.x, p.y, h}, moving ? 1.0f : 0.5f);
+        if (!logged) {
+            logged = true;
+            spdlog::info("ripple: pawn {} wading at ({:.0f}, {:.0f}), feet {:.0f} under the water at {:.0f}", i, p.x, p.y,
+                         h - p.z, h);
+        }
+    }
 }
 
 void UpdateGhosts() {
