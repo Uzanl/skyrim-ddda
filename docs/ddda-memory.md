@@ -229,11 +229,17 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
 Not checked live yet. Source: ddda-dinput8's `DamageLog.cpp` (github.com/jaryn-kubik/ddda-dinput8),
 and its signatures matched in our DDDA.exe.
 
-- **Damage is applied by `0x44B710`**, called from three sites: `0xAAAF78`, `0xBAA3E8`,
-  `0xBB7245`. Each site is `push ecx; movss [esp], xmm1; call 0x44B710` followed by a
+- **Three points in the hit code** (absolute addresses): `0xAAAF78`, `0xBAA3E8`,
+  `0xBB7245`. Each is `push ecx; movss [esp], xmm1; call 0x44B710` followed by a
   virtual call through the target's vtable `+0x1D4`. At the call, `[esp]` is the damage
   (float), and the target object is in `ebx` (site 1) or `esi` (sites 2 and 3).
   ddda-dinput8 reads `target+0x2D` (byte) as the target id.
+- `0x44B710` does **not** apply the damage. It only adds it to a global statistic,
+  `[0x18FA4BC]+0xB88AC` (capped), when the flag `+0xB8844 & 0x40000` is clear. The HP
+  write is somewhere else in the hit code (not found yet).
+- `src/ddda_bridge/damage_log.cpp` redirects the three calls to stubs that log site,
+  target class, damage, HP and position, then continue to `0x44B710` (built and installed
+  2026-10-06, not tested in game).
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),

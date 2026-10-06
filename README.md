@@ -31,7 +31,7 @@ Skyrim shows the result. The two processes talk through shared memory
 | Water reacting to the pawns in Skyrim's rivers | ghosts did not make the water react (2026-10-03); direct ripples (`AddRipple` at wading pawns, Skyrim's own scale found with a spy): verified in game 2026-10-03 ("funcionou bem") (docs/ghosts.md, "Water test") |
 | Pawns fall into the void when the save is away from the link spot | open bug, reported 2026-10-03; analysis in docs/party-in-terrain-mode.md |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
-| Combat vs Skyrim NPCs, pawn spells/effects, Rift | not started (plan in docs/skycraft-notes.md) |
+| Combat vs Skyrim NPCs, pawn spells/effects, Rift | recon started 2026-10-06: damage log (who takes how much in DDDA) built and installed, not tested in game; plan in docs/skycraft-notes.md, findings in docs/ddda-memory.md, "Combat" |
 
 ## Where we stopped (2026-10-03, night)
 
@@ -84,6 +84,14 @@ Skyrim shows the result. The two processes talk through shared memory
   ([docs/bridge.md](docs/bridge.md), "Pawn labels").
 - Decided 2026-10-03: navigation stays DDDA's own. Letting Skyrim's navmesh lead the
   pawns was considered and dropped.
+
+- **Combat recon (2026-10-06):** started on combat ahead of the void bug. Crash
+  Logger SSE is installed. A damage log is built and installed in the DDDA DLL. It is
+  log-only, so it also runs in DDDA started from Steam. To test: fight goblins and read
+  the `damage:` lines in `ddda_bridge.log`. They should show the enemy's class
+  (`uEnemy`?), HP and position. Then: find the HP write, the enemy list the pawns' AI
+  reads (`sAISensorTarget`), and try to "hijack" a live enemy as the stand-in for a
+  Skyrim NPC ([docs/ddda-memory.md](docs/ddda-memory.md), "Combat").
 
 Next, in order:
 0. The void bug above (fix 1 first: protection until the target's tiles came from the overlay).
@@ -191,6 +199,7 @@ src/ddda_bridge/             the DDDA-side DLL, built as dinput8.dll (x86):
   frame_trace.cpp              D3D9 state hooks + one-frame call trace (ddda_trace_request)
   isolate.cpp                  party-only rendering (learns the party's vertex buffers)
   relight.cpp                  Skyrim's sun, ambient and fog on DDDA's uSky* lights
+  damage_log.cpp               combat recon: logs each hit's target, damage and HP (log-only)
 src/skse_plugin/plugin.cpp   Skyrim SKSE plugin (x64): reads the party, sends Skyrim's camera and
                              lighting, switches to an interior's arena mapping
 src/skse_ghosts/             DDDAGhosts (CommonLibSSE, build_skse.bat): ground raycasts and

@@ -19,6 +19,7 @@
 #include "frame_trace.h"
 #include "isolate.h"
 #include "relight.h"
+#include "damage_log.h"
 
 #if !defined(_M_IX86)
 #error "DDDA is 32-bit; build this DLL for x86."
@@ -2000,6 +2001,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
     bool hooks = InstallHooks();
     relight::Init(&Log, g_base);
     relight::Install();
+    damagelog::Install(&Log, g_base);
     OpenCameraMapping();
     OpenNamesMapping();
     OpenGroundMapping();
@@ -2021,6 +2023,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
         PollGround();
         PollExperiment(g_folder);
         relight::Poll();
+        damagelog::Poll();
         Captured snap[bridge::kRoleCount];
         AcquireSRWLockShared(&g_lock);
         memcpy(snap, g_captured, sizeof(snap));
