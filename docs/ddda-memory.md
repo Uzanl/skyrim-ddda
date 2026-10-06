@@ -238,8 +238,13 @@ and its signatures matched in our DDDA.exe.
   `[0x18FA4BC]+0xB88AC` (capped), when the flag `+0xB8844 & 0x40000` is clear. The HP
   write is somewhere else in the hit code (not found yet).
 - `src/ddda_bridge/damage_log.cpp` redirects the three calls to stubs that log site,
-  target class, damage, HP and position, then continue to `0x44B710` (built and installed
-  2026-10-06, not tested in game).
+  target class, damage, HP and position, then continue to `0x44B710`. In game 2026-10-06
+  (plain DDDA, the user killed several bandits): `3 of 3 sites hooked`, but **no hit went
+  through any site**. They are not the normal melee/arrow path.
+- Bandits are **`uHumanEnemy`** (vtable `0x15EF670`), live objects in the same heap as
+  `uPlayer` (`tools/recon/findclass.py`). `+0x40` is their position, as for the party.
+  `[+0x4BC]+0x1D8` read 0/0 on the dead ones (one 0/33), so enemy HP is still to be
+  confirmed on a live enemy (then a write watchpoint on it gives the HP-writing code).
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),
