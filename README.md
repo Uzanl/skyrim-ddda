@@ -31,7 +31,7 @@ Skyrim shows the result. The two processes talk through shared memory
 | Water reacting to the pawns in Skyrim's rivers | ghosts did not make the water react (2026-10-03); direct ripples (`AddRipple` at wading pawns, Skyrim's own scale found with a spy): verified in game 2026-10-03 ("funcionou bem") (docs/ghosts.md, "Water test") |
 | Pawns fall into the void when the save is away from the link spot | open bug, reported 2026-10-03; analysis in docs/party-in-terrain-mode.md |
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
-| Combat vs Skyrim NPCs, pawn spells/effects, Rift | recon started 2026-10-06: damage log (who takes how much in DDDA) built and installed; in game 2026-10-06 its three sites never fired (not the normal hit path); bandits are `uHumanEnemy`; plan in docs/skycraft-notes.md, findings in docs/ddda-memory.md, "Combat" |
+| Combat vs Skyrim NPCs, pawn spells/effects, Rift | recon started 2026-10-06: damage log on DDDA's ApplyDamage verified in game (every hit, magic or physical, party or enemy, with victim class and HP); plan in docs/skycraft-notes.md, findings in docs/ddda-memory.md, "Combat" |
 
 ## Where we stopped (2026-10-03, night)
 
@@ -86,10 +86,12 @@ Skyrim shows the result. The two processes talk through shared memory
   pawns was considered and dropped.
 
 - **Combat recon (2026-10-06):** started on combat ahead of the void bug. Crash
-  Logger SSE is installed. A damage log is built and installed in the DDDA DLL. It is
-  log-only, so it also runs in DDDA started from Steam. To test: fight goblins and read
-  the `damage:` lines in `ddda_bridge.log` (2026-10-06: none, the sites are not on the normal hit path). They should show the enemy's class
-  (`uEnemy`?), HP and position. Then: find the HP write, the enemy list the pawns' AI
+  Logger SSE is installed. The DDDA DLL logs every hit (`damage:` lines in
+  `ddda_bridge.log`), log-only, so it also runs in DDDA from Steam. **Verified in game**
+  (the user fought wolves and bandits): 68 hits, magic and physical, with the victim's
+  class (`uEm0200` wolves, `uHumanEnemy` bandits, `uCmc` the party), damage, live HP and
+  position; all through DDDA's ApplyDamage (`+376F50`), called from one hit function.
+  Next: confirm the attacker in that hit function, find the enemy list the pawns' AI
   reads (`sAISensorTarget`), and try to "hijack" a live enemy as the stand-in for a
   Skyrim NPC ([docs/ddda-memory.md](docs/ddda-memory.md), "Combat").
 

@@ -236,13 +236,19 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   each `push ecx; movss [esp], xmm1; call 0x44B710`, target in `ebx`/`esi`) never fired
   in game 2026-10-06 (the Arisen's spells, a pawn's melee and arrows). `0x44B710` only adds
   damage to a global statistic, `[0x18FA4BC]+0xB88AC`.
-- `src/ddda_bridge/damage_log.cpp` now hooks ApplyDamage's entry (above) and logs every
-  hit's victim class, damage, HP, position and calling address (built 2026-10-06, not
-  tested in game).
-- Bandits are **`uHumanEnemy`** (vtable `0x15EF670`), live objects in the same heap as
-  `uPlayer` (`tools/recon/findclass.py`). `+0x40` is their position, as for the party.
-  `[+0x4BC]+0x1D8` read 0/0 on the dead ones (one 0/33), so enemy HP is still to be
-  confirmed on a live enemy (the damage log prints it).
+- **Damage log, verified in game 2026-10-06** (plain DDDA, the user fought wolves and
+  bandits with a mage, pawns melee and bow): `src/ddda_bridge/damage_log.cpp` hooks
+  ApplyDamage's entry and logged 68 hits, game unaffected. Every hit, magic or physical,
+  party or enemy, came through it:
+  - victims: `uEm0200` (800 HP, the wolves), `uHumanEnemy` (bandits, 1000 or 1300 HP),
+    `uCmc` (the party's own characters), and breakable objects (`uOmObj7515`/`7520`, 100 HP);
+  - the vital block works for enemies too: `[vital+8]`/`+0xC` gave live HP falling to 0,
+    and `[vital+0x1B4]+0x40` their position;
+  - all hits were called from **one hit-handling function**, at `+36E27D` (all victims) and
+    `+36E31B` (a second vital: `uEm0200` takes each hit twice, on two different vital blocks);
+  - in that function `ebp` looks like the hit record: damage at `[ebp+0x7C]`, and
+    `[ebp+0x50]` an object tested by class (maybe the attacker; not checked). `edi+0xCCC` is
+    tested against `uEnemy`'s DTI (`0x19A1130`).
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),
