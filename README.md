@@ -5,7 +5,7 @@ running as its own process and computes the Arisen, the pawns and combat.
 Skyrim shows the result. The two processes talk through shared memory
 (SkyCraft-style bridge).
 
-## Status (2026-10-03)
+## Status (2026-10-06)
 
 | Step | State |
 |---|---|
@@ -33,7 +33,26 @@ Skyrim shows the result. The two processes talk through shared memory
 | Shadows (Skyrim's on the pawns, the pawns' on Skyrim's ground) | not started |
 | Combat vs Skyrim NPCs, pawn spells/effects, Rift | recon started 2026-10-06: damage log on DDDA's ApplyDamage verified in game (every hit, magic or physical, party or enemy, with victim class and HP); plan in docs/skycraft-notes.md, findings in docs/ddda-memory.md, "Combat" |
 
-## Where we stopped (2026-10-03, night)
+## Where we stopped (2026-10-06, evening)
+
+- **Combat recon (2026-10-06):** started on combat ahead of the void bug. Crash
+  Logger SSE 1.25.0 is installed for Skyrim. The DDDA DLL logs every hit (`damage:`
+  lines in `ddda_bridge.log`, `src/ddda_bridge/damage_log.cpp`). It only logs, so it
+  also runs in DDDA from Steam. **Verified in game** (the user fought wolves and
+  bandits): 68 hits, magic and physical, with the victim's class (`uEm0200` wolves,
+  `uHumanEnemy` bandits, `uCmc` the party), damage, live HP and position; all through
+  DDDA's ApplyDamage (`+376F50`), called from one hit function (`+36E27D`/`+36E31B`).
+  - **Installed, waiting for the in-game test:** the log now also copies the hit record
+    (the hit function's `ebp`) and the registers at each hit. A `refs:` line under each
+    `damage:` line lists the characters they point to. To test: DDDA from Steam, fight
+    wolves/bandits (the user hits, Mariana hits, an enemy hits the party), then compare
+    who hit with the offsets in `refs:`. The offset that always holds the attacker is
+    the attacker field.
+  - Then: find the enemy list the pawns' AI reads (`sAISensorTarget`), and try to
+    "hijack" a live enemy (AI frozen, moved every frame to a Skyrim NPC's mapped spot)
+    as the stand-in for that NPC: do the pawns attack it?
+  - Findings: [docs/ddda-memory.md](docs/ddda-memory.md), "Code addresses" and "Combat";
+    plan: [docs/skycraft-notes.md](docs/skycraft-notes.md), "Combat".
 
 - **Water: works** ("funcionou bem"). Ghosts (Skyrim actors at the pawns) followed
   the pawns but the river did not react, and with AI on they crashed Skyrim; they are off.
@@ -85,18 +104,9 @@ Skyrim shows the result. The two processes talk through shared memory
 - Decided 2026-10-03: navigation stays DDDA's own. Letting Skyrim's navmesh lead the
   pawns was considered and dropped.
 
-- **Combat recon (2026-10-06):** started on combat ahead of the void bug. Crash
-  Logger SSE is installed. The DDDA DLL logs every hit (`damage:` lines in
-  `ddda_bridge.log`), log-only, so it also runs in DDDA from Steam. **Verified in game**
-  (the user fought wolves and bandits): 68 hits, magic and physical, with the victim's
-  class (`uEm0200` wolves, `uHumanEnemy` bandits, `uCmc` the party), damage, live HP and
-  position; all through DDDA's ApplyDamage (`+376F50`), called from one hit function.
-  Next: confirm the attacker in that hit function, find the enemy list the pawns' AI
-  reads (`sAISensorTarget`), and try to "hijack" a live enemy as the stand-in for a
-  Skyrim NPC ([docs/ddda-memory.md](docs/ddda-memory.md), "Combat").
-
 Next, in order:
-0. The void bug above (fix 1 first: protection until the target's tiles came from the overlay).
+0. Combat recon (first bullet above; the attacker test is installed).
+0b. The void bug above, parked by the user (fix 1 first: protection until the target's tiles came from the overlay).
 1. Interiors, polish: measure the entry with the arena worker, larger interiors (dungeons are not tested; the graph inside a small house splits into
    islands around furniture), interior cells connected by load doors.
 2. Combat, following SkyCraft's plan: Skyrim "ghost" actors at the pawns with damage
