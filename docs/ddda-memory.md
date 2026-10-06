@@ -53,9 +53,15 @@ body when the camera is rotated. During area loads it reads `(0, 200, -700)`.
 
 ## Code addresses
 
-- `DDDA.exe+376F50`: applies an HP change (damage) to a character; `this` in EDI/ECX.
+- `DDDA.exe+376F50` (ApplyDamage): takes HP off a character. `eax` = its vital block,
+  stack: damage (float, positive) and a second argument; `ret 8`. Does
+  `[vital+8] -= damage`. Vital block: HP `+8`, max `+0xC`, owning character `+0x1B4`
+  (the same HP as `[char+0x4BC]+0x1D8`, so vital = `[char+0x4BC]+0x1D0`; seen live on a pawn).
 - `DDDA.exe+488DA0`: per-frame pawn routine; the character is in EAX (custom convention).
-  It is called from the pawn `move()`.
+  It is called from the pawn `move()` (and ~50 other places). It writes the HP every
+  frame (`[vital+8] += [esp+0x1C]`, then clamps to max x `[char+0x20CC]`), so a write
+  watchpoint on a pawn's HP catches it (+488F95, +488FFD) thousands of times
+  (2026-10-06); it is not the damage.
 
 ## sUnit and the focus pause
 
@@ -224,27 +230,19 @@ sets flag `0x40000000` in `+0x108` when it is below 1. Writing +0x158 or resetti
 +0x2514 after move() does not hold; the bridge patches the load at `+0x76A07B` to read a
 constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
 
-## Combat: damage sites and enemy classes (static, 2026-10-06)
+## Combat: damage and enemy classes (2026-10-06)
 
-Not checked live yet. Source: ddda-dinput8's `DamageLog.cpp` (github.com/jaryn-kubik/ddda-dinput8),
-and its signatures matched in our DDDA.exe.
-
-- **Three points in the hit code** (absolute addresses): `0xAAAF78`, `0xBAA3E8`,
-  `0xBB7245`. Each is `push ecx; movss [esp], xmm1; call 0x44B710` followed by a
-  virtual call through the target's vtable `+0x1D4`. At the call, `[esp]` is the damage
-  (float), and the target object is in `ebx` (site 1) or `esi` (sites 2 and 3).
-  ddda-dinput8 reads `target+0x2D` (byte) as the target id.
-- `0x44B710` does **not** apply the damage. It only adds it to a global statistic,
-  `[0x18FA4BC]+0xB88AC` (capped), when the flag `+0xB8844 & 0x40000` is clear. The HP
-  write is somewhere else in the hit code (not found yet).
-- `src/ddda_bridge/damage_log.cpp` redirects the three calls to stubs that log site,
-  target class, damage, HP and position, then continue to `0x44B710`. In game 2026-10-06
-  (plain DDDA, the user killed several bandits): `3 of 3 sites hooked`, but **no hit went
-  through any site**. They are not the normal melee/arrow path.
+- The three call sites from ddda-dinput8's DamageLog (`0xAAAF78`, `0xBAA3E8`, `0xBB7245`,
+  each `push ecx; movss [esp], xmm1; call 0x44B710`, target in `ebx`/`esi`) never fired
+  in game 2026-10-06 (the Arisen's spells, a pawn's melee and arrows). `0x44B710` only adds
+  damage to a global statistic, `[0x18FA4BC]+0xB88AC`.
+- `src/ddda_bridge/damage_log.cpp` now hooks ApplyDamage's entry (above) and logs every
+  hit's victim class, damage, HP, position and calling address (built 2026-10-06, not
+  tested in game).
 - Bandits are **`uHumanEnemy`** (vtable `0x15EF670`), live objects in the same heap as
   `uPlayer` (`tools/recon/findclass.py`). `+0x40` is their position, as for the party.
   `[+0x4BC]+0x1D8` read 0/0 on the dead ones (one 0/33), so enemy HP is still to be
-  confirmed on a live enemy (then a write watchpoint on it gives the HP-writing code).
+  confirmed on a live enemy (the damage log prints it).
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),
