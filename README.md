@@ -95,7 +95,8 @@ Next, in order:
    (isolate keeps only party meshes). Idea from the user: Skyrim collision capsules on
    each pawn's DDDA skeleton (bones read live), so Skyrim's hits and arrows land on the
    real body; see docs/ghosts.md, "Skeleton in Skyrim". Ghosts with AI on crashed
-   Skyrim: install a crash logger (Crash Logger SSE) before trying that again.
+   Skyrim: Crash Logger SSE 1.25.0 is installed now (2026-10-06); its logs go to
+   `Documents\My Games\Skyrim Special Edition\SKSE\crash-*.log`.
 3. Shadows, post-processing match, point lights ([docs/lighting.md](docs/lighting.md)).
    Labels could shrink with distance (they overlap when pawns are far and close together).
 4. Performance at full resolution is not measured (each frame copies colour and mask, 2 x

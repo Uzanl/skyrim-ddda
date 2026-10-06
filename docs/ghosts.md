@@ -70,7 +70,9 @@ water sounds), and does that still work when they are invisible?
   `SetPosition` moved only the reference's data.
 - Second try (21:06): AI on, `Update3DPosition(true)` and the pawn's velocity on the
   character controller. Skyrim crashed about 20 s in, right after the ghosts were deleted
-  when the terrain link dropped. No crash logger is installed, so the cause is unknown.
+  when the terrain link dropped. No crash logger was installed then, so the cause is unknown.
+  Crash Logger SSE 1.25.0 is installed since 2026-10-06: a repeat leaves a `crash-*.log`
+  in `Documents\My Games\Skyrim Special Edition\SKSE\`.
 - Third try (21:2x): AI off, `SetPosition(p, true)` plus `Update3DPosition(true)`. The
   ghosts followed the pawns (the user saw them), but the water did nothing. Ghosts are
   off again (`DDDAGhosts_test.txt` = off).
