@@ -223,3 +223,20 @@ DDDA fades characters standing between the camera and the player. The pawn routi
 sets flag `0x40000000` in `+0x108` when it is below 1. Writing +0x158 or resetting
 +0x2514 after move() does not hold; the bridge patches the load at `+0x76A07B` to read a
 constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
+
+## Combat: damage sites and enemy classes (static, 2026-10-06)
+
+Not checked live yet. Source: ddda-dinput8's `DamageLog.cpp` (github.com/jaryn-kubik/ddda-dinput8),
+and its signatures matched in our DDDA.exe.
+
+- **Damage is applied by `0x44B710`**, called from three sites: `0xAAAF78`, `0xBAA3E8`,
+  `0xBB7245`. Each site is `push ecx; movss [esp], xmm1; call 0x44B710` followed by a
+  virtual call through the target's vtable `+0x1D4`. At the call, `[esp]` is the damage
+  (float), and the target object is in `ebx` (site 1) or `esi` (sites 2 and 3).
+  ddda-dinput8 reads `target+0x2D` (byte) as the target id.
+- Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
+  `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
+  `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),
+  `cAISensorTarget`, `sLockOnManager::cLockOnTarget`, `cTargetEnemy`,
+  `cLayoutSetEnemy` and `cSetInfoEnemy` (enemy placement in a layout: a lead for spawning),
+  `cLinkUnitEnemy`.
