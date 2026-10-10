@@ -105,7 +105,7 @@ Skyrim shows the result. The two processes talk through shared memory
   pawns was considered and dropped.
 
 Next, in order:
-0. Combat recon: the target list is mapped (docs/ddda-memory.md, "AI target list": group 3 = enemies, 1 Arisen, 2 pawns; each entry keeps its owner's global position); next the hijacked-enemy test (built and installed 2026-10-10, `hijack` in ddda_experiment.txt; not tested) (first bullet above).
+0. Combat recon: the target list is mapped (docs/ddda-memory.md, "AI target list": group 3 = enemies, 1 Arisen, 2 pawns; each entry keeps its owner's global position); the hijacked-enemy test showed that the area mapped to Riverwood has no enemies and DDDA unloads the save area's enemies at the link (2026-10-10), so stand-ins must be spawned: next, find how DDDA creates an enemy (docs/ddda-memory.md, "Enemy placement") (first bullet above).
 0b. The void bug above, parked by the user (fix 1 first: protection until the target's tiles came from the overlay).
 1. Interiors, polish: measure the entry with the arena worker, larger interiors (dungeons are not tested; the graph inside a small house splits into
    islands around furniture), interior cells connected by load doors.

@@ -306,8 +306,26 @@ in `ddda_experiment.txt`, bridge session only. First run (2026-10-10, linked to 
 Riverwood): no enemy was loaded at all, neither at the save spot nor after the link (the
 target list held only the party). So it now takes the nearest active group-3 entry's owner
 at any distance, and the spot follows the Arisen (re-placed after 3 m, height set again
-after 20 m), so an enemy taken at the save spot follows the party through the link. It hooks its class's move() (slot 8, vtable and code range checked), and
+after 20 m), so an enemy taken at the save spot follows the party through the link.
+Second run (2026-10-10): at the save spot it took a wolf 10 m away that left the active
+enemies 26 ms later (never pinned; the spot of a wolf seen inactive earlier, likely a
+corpse); at the link every enemy of the save area unloaded. **DDDA keeps enemies only in
+the party's area, and the area mapped to Riverwood has none: stand-ins must be spawned.**
+It hooks its class's move() (slot 8, vtable and code range checked), and
 after each move() writes its x/z to a spot 6 m in front of the Arisen (camera -> Arisen
 direction; height the Arisen's + 50 cm when placed), syncing its scenery adjust's position
 copies if one is found in the object by vtable (`0x159704C`). Its AI keeps running. Log
 lines `hijack:`; hits on it show in the damage log.
+
+## Enemy placement: sSetManager (static, 2026-10-10)
+
+Nothing public spawns enemies in DDDA (searched 2026-10-10; a Bitterblack Isle randomizer,
+Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archives).
+- `sSetManager` `[0x18FA504]` (vtable `0x15623D4`, constructor around `+0x9FD4F`) owns lot
+  managers `cLotMgr<cLayoutSetEnemy>` (vt `0x15624B8`), `<cLayoutSetNpc>` (`0x15624D4`),
+  `<cLayoutSetOm>` (`0x15624F0`) and `<cLayoutSetDynamic>` (`0x156250C`, constructor `+0xAA0B0`).
+- `cLayoutSetEnemy` (vt `0x1593E30`) with `cLayoutSetEnemy::cEmArcLoad` (vt `0x1593E78`):
+  an enemy's archive (model, motion) is loaded before it is placed.
+  `cLayoutSetDynamic` (vt `0x1593A3C`, `cLotData` `0x1593A58`, code around `+0x35FEC9`):
+  maybe the runtime path (ambushes, reinforcements); not read yet.
+- `cSetInfoEnemy` (vt `0x1597258`) and per-type `cSetInfoEnemyNNNN`: placement records.
