@@ -255,9 +255,12 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   Hits of 0.0 damage came with arg2 = 1 (probably blocked or guarded; not checked).
   The shooter inside the shell: the log copies 0x800 bytes of it at the hit. Seen in game
   2026-10-10: no direct pointer to a character in 40 shells (pawn and enemy arrows, homing
-  spells). `uShl*` registers no properties of its own (only uModel's). Now the `shooter:`
-  line also lists pointers into a known character (`&Class+off`) and one pointer further
-  (`->`); built, not tested. Once, a homing spell's hit record had `rec+0x284` = uPlayer.
+  spells). `uShl*` registers no properties of its own (only uModel's). A second run with
+  pointers into known characters and one level further (46 shells) found only `shl+0x36C`
+  -> `cObjCollision::NodeHitInfo` (what the shell touched, not its shooter: once a pawn,
+  on an arrow that hurt the Arisen). So the shooter is not a plain pointer (maybe a handle
+  or ID); parked, a fallback is enough for combat (the nearest party member shooting).
+  Once, a homing spell's hit record had `rec+0x284` = uPlayer.
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),
