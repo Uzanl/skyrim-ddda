@@ -21,6 +21,7 @@
 #include "relight.h"
 #include "damage_log.h"
 #include "hijack.h"
+#include "spawn_log.h"
 
 #if !defined(_M_IX86)
 #error "DDDA is 32-bit; build this DLL for x86."
@@ -2008,6 +2009,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
     relight::Install();
     damagelog::Install(&Log, g_base);
     hijack::Init(&Log, g_base);
+    spawnlog::Install(&Log, g_base);
     OpenCameraMapping();
     OpenNamesMapping();
     OpenGroundMapping();
@@ -2030,6 +2032,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
         PollExperiment(g_folder);
         relight::Poll();
         damagelog::Poll();
+        spawnlog::Poll();
         Captured snap[bridge::kRoleCount];
         AcquireSRWLockShared(&g_lock);
         memcpy(snap, g_captured, sizeof(snap));

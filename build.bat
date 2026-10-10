@@ -19,7 +19,7 @@ if not exist "%ROOT%build\x64" mkdir "%ROOT%build\x64"
 
 setlocal
 call "%VS%\vcvars32.bat" >nul 2>nul || exit /b 1
-cl %CFLAGS% /LD "%ROOT%src\ddda_bridge\dllmain.cpp" "%ROOT%src\ddda_bridge\file_overlay.cpp" "%ROOT%src\ddda_bridge\frame_capture.cpp" "%ROOT%src\ddda_bridge\frame_trace.cpp" "%ROOT%src\ddda_bridge\isolate.cpp" "%ROOT%src\ddda_bridge\relight.cpp" "%ROOT%src\ddda_bridge\damage_log.cpp" "%ROOT%src\ddda_bridge\hijack.cpp" /Fo"%ROOT%build\x86\\" /Fe"%ROOT%build\x86\dinput8.dll" /link user32.lib || exit /b 1
+cl %CFLAGS% /LD "%ROOT%src\ddda_bridge\dllmain.cpp" "%ROOT%src\ddda_bridge\file_overlay.cpp" "%ROOT%src\ddda_bridge\frame_capture.cpp" "%ROOT%src\ddda_bridge\frame_trace.cpp" "%ROOT%src\ddda_bridge\isolate.cpp" "%ROOT%src\ddda_bridge\relight.cpp" "%ROOT%src\ddda_bridge\damage_log.cpp" "%ROOT%src\ddda_bridge\hijack.cpp" "%ROOT%src\ddda_bridge\spawn_log.cpp" /Fo"%ROOT%build\x86\\" /Fe"%ROOT%build\x86\dinput8.dll" /link user32.lib || exit /b 1
 rem Smoke tests load build\x86\dinput8.dll from their own folder.
 cl /nologo /EHsc "%ROOT%tools\dll_smoketest\load_test.cpp" /Fo"%ROOT%build\x86\\" /Fe"%ROOT%build\x86\load_test.exe" ole32.lib || exit /b 1
 cl /nologo /EHsc "%ROOT%tools\dll_smoketest\dinput_test.cpp" /Fo"%ROOT%build\x86\\" /Fe"%ROOT%build\x86\dinput_test.exe" dinput8.lib dxguid.lib ole32.lib user32.lib || exit /b 1

@@ -329,3 +329,9 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   `cLayoutSetDynamic` (vt `0x1593A3C`, `cLotData` `0x1593A58`, code around `+0x35FEC9`):
   maybe the runtime path (ambushes, reinforcements); not read yet.
 - `cSetInfoEnemy` (vt `0x1597258`) and per-type `cSetInfoEnemyNNNN`: placement records.
+- `uEnemy`'s constructor: `+0x6A7B60`, new object in `edi`; calls the base constructor
+  `+0x44A100`, then writes uEnemy's vtable (`0x15DF2A8`). 30+ enemy constructors call it.
+  **Spawn log** (`src/ddda_bridge/spawn_log.cpp`, log-only, also in plain DDDA; built and
+  installed 2026-10-10, not tested): hooks its entry and logs each enemy (`spawn:` with
+  class and position 0.5 s later) and the return addresses found on the stack (`callers:`),
+  to find the function that creates an enemy.
