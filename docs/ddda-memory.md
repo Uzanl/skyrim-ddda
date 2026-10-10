@@ -378,8 +378,14 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     It never moved and did not appear in the AI target list. Within about 30 s **every wolf,
     the 10 real ones and ours, was destroyed** (vtable back to `MtObject`, position unchanged:
     they did not fall; no hits logged). The user: in the bridge session no enemy is ever
-    seen. Suspects: "hold" (party asleep) or the overlay's tile archives. In plain DDDA the
-    same wolves stay.
+    seen. In plain DDDA the same wolves stay. A second spawn with "hold" off (20:35) was
+    destroyed within 11 s too, so "hold" is not the cause (the user then fell into the void:
+    without "hold" the party stood over the overlay's ground). The overlay only replaces each
+    tile's `h` collision (`arc.rebuild`, other entries kept).
+  - **Destroy log** (built 2026-10-10, not tested): the spawn log also hooks uEnemy's
+    destructor `+0x6A8730` (thiscall; 10 bytes `53 56 8B F1 8B 8E F4 5F 00 00` replayed) and
+    logs `destroy:` with class, position and the callers, to find what deletes them. The
+    stack is now copied in 64-byte pieces.
   - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
