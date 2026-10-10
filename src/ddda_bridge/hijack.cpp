@@ -29,15 +29,19 @@ constexpr uintptr_t kCamRoot = 0x14D1578, kCamOff = 0xDF0;  // camera position (
 // since enemies may keep it at another offset than the party's +0x19C0.
 constexpr uintptr_t kScrAdjustVt = 0x119704C;
 constexpr uintptr_t kAdjCopies[3] = {0x120, 0x130, 0x140}, kAdjVelocity = 0x150;
-constexpr float kAhead = 600.0f;     // 6 m in front of the Arisen
-constexpr float kMaxPick = 50000.0f;  // 500 m: farther enemies are not taken
+constexpr float kAhead = 600.0f;      // 6 m in front of the Arisen
+constexpr float kMaxPick = 1.0e7f;     // any loaded enemy (2026-10-10: none within 500 m of
+                                       // the linked party; one taken at the save spot must
+                                       // follow the party when the link moves it far away)
+constexpr float kReanchor = 300.0f;    // the spot follows the Arisen once it is 3 m away
+constexpr float kRelift = 2000.0f;     // after a 20 m move the height is set again
 
 LogFn g_log = nullptr;
 uintptr_t g_base = 0;
 volatile LONG g_on = 0;
 volatile uintptr_t g_target = 0, g_targetVt = 0, g_adjust = 0;
 volatile LONG g_placeY = 0;  // first frame: also set the height (Arisen + 50 cm)
-float g_spot[3];
+float g_spot[3], g_anchor[3];
 volatile LONG g_pins = 0;
 
 struct Patched {
@@ -163,6 +167,19 @@ bool StillEnemy(uintptr_t u) {
     return false;
 }
 
+// The spot 6 m in front of the Arisen, horizontally from the camera to the Arisen.
+void PlaceSpot(const float* arisen) {
+    float fx = 0, fz = 1, cam[3];
+    if (Read(U32(g_base + kCamRoot) + kCamOff, cam, sizeof(cam)) && Sane(cam)) {
+        float dx = arisen[0] - cam[0], dz = arisen[2] - cam[2], l = std::hypot(dx, dz);
+        if (l > 1.0f) fx = dx / l, fz = dz / l;
+    }
+    g_spot[0] = arisen[0] + fx * kAhead;
+    g_spot[1] = arisen[1] + 50.0f;
+    g_spot[2] = arisen[2] + fz * kAhead;
+    memcpy(g_anchor, arisen, sizeof(g_anchor));
+}
+
 }  // namespace
 
 void Init(LogFn log, uintptr_t base) {
@@ -188,21 +205,13 @@ void Poll(const float* arisen) {
     }
     if (!t && arisen && Sane(arisen) && now - lastPick >= 2000) {
         lastPick = now;
-        float d = 0, cam[3];
+        float d = 0;
         uintptr_t u = PickEnemy(arisen, &d);
         if (!u) {
-            g_log("hijack: no active enemy within %.0f m", kMaxPick / 100);
+            g_log("hijack: no active enemy loaded");
             return;
         }
-        // Forward = from the camera to the Arisen, horizontally (Skyrim's view direction).
-        float fx = 0, fz = 1;
-        if (Read(U32(g_base + kCamRoot) + kCamOff, cam, sizeof(cam)) && Sane(cam)) {
-            float dx = arisen[0] - cam[0], dz = arisen[2] - cam[2], l = std::hypot(dx, dz);
-            if (l > 1.0f) fx = dx / l, fz = dz / l;
-        }
-        g_spot[0] = arisen[0] + fx * kAhead;
-        g_spot[1] = arisen[1] + 50.0f;
-        g_spot[2] = arisen[2] + fz * kAhead;
+        PlaceSpot(arisen);
         uintptr_t vt = U32(u), adj = 0;
         for (uintptr_t off = 0; off < 0x6000; off += 4)
             if (U32(u + off) == g_base + kScrAdjustVt) {
@@ -222,6 +231,17 @@ void Poll(const float* arisen) {
         g_log("hijack: took %s %08X, %.0f m away; held at (%.0f, %.0f, %.0f); scenery adjust %s", c,
               static_cast<unsigned>(u), d / 100, g_spot[0], g_spot[1], g_spot[2],
               adj ? "found" : "not found");
+    }
+    if (t && arisen && Sane(arisen)) {
+        float moved = std::hypot(arisen[0] - g_anchor[0], arisen[2] - g_anchor[2]);
+        if (moved > kReanchor) {
+            PlaceSpot(arisen);
+            if (moved > kRelift) {
+                g_placeY = 1;
+                g_log("hijack: Arisen moved %.0f m; target follows to (%.0f, %.0f, %.0f)", moved / 100, g_spot[0],
+                      g_spot[1], g_spot[2]);
+            }
+        }
     }
     if (t && now - lastReport >= 2000) {
         lastReport = now;

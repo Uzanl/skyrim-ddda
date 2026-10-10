@@ -302,9 +302,12 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   `+0x50` 1000 (range?), `+0x58` owner, `+0x5C` 3.
 
 **Hijacked enemy (built 2026-10-10, not tested):** `src/ddda_bridge/hijack.cpp`, line `hijack`
-in `ddda_experiment.txt`, bridge session only. Takes the nearest active group-3 entry's
-owner (up to 500 m), hooks its class's move() (slot 8, vtable and code range checked), and
+in `ddda_experiment.txt`, bridge session only. First run (2026-10-10, linked to Skyrim near
+Riverwood): no enemy was loaded at all, neither at the save spot nor after the link (the
+target list held only the party). So it now takes the nearest active group-3 entry's owner
+at any distance, and the spot follows the Arisen (re-placed after 3 m, height set again
+after 20 m), so an enemy taken at the save spot follows the party through the link. It hooks its class's move() (slot 8, vtable and code range checked), and
 after each move() writes its x/z to a spot 6 m in front of the Arisen (camera -> Arisen
-direction; height set once to the Arisen's + 50 cm), syncing its scenery adjust's position
+direction; height the Arisen's + 50 cm when placed), syncing its scenery adjust's position
 copies if one is found in the object by vtable (`0x159704C`). Its AI keeps running. Log
 lines `hijack:`; hits on it show in the damage log.
