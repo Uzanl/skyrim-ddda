@@ -261,9 +261,14 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   on an arrow that hurt the Arisen). So the shooter is not a plain pointer (maybe a handle
   or ID); parked, a fallback is enough for combat (the nearest party member shooting).
   Once, a homing spell's hit record had `rec+0x284` = uPlayer, and once a `uShlBase` that
-  killed a wolf had `rec+0x98` = a pawn (`uCmc`). Third version (built, not tested): the
-  party's objects come from the move() hooks, so pointers at or into any party member count
-  (`shooter:` names the role, e.g. `main pawn+2600`).
+  killed a wolf had `rec+0x98` = a pawn (`uCmc`). Third run (2026-10-10, 15 min of play,
+  121 hits, 82 shells), with the party's objects from the move() hooks as known characters:
+  still no fixed offset. Candidates fall at a different offset nearly every hit (Arisen at
+  `+0x334`, `+0x330`, `+0x284`, `+0x6F4`; one shell pointed to the Arisen and a bandit), and the
+  32 homing spells pointed to no party member. `rec+0x284` held a pawn twice and a `uEm9000`
+  once. **Conclusion: the shooter is not a plain pointer in the shell; parked.** Melee: 25 of
+  25 hits gave the attacker at `rec+0x50`. Other attacker classes seen: `uEm9000`,
+  `uOmObj1515` (an object or trap), `uShlSpeed`, `uShlCheckConst`, `uShlLightningThunder`.
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),

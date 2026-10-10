@@ -45,7 +45,7 @@ Skyrim shows the result. The two processes talk through shared memory
   - **Attacker found (verified in game 2026-10-10, 50 hits vs bandits):** the hit
     record's `+0x50` (the hit function's `ebp`) holds who hit: `uPlayer` or `uHumanEnemy`
     for melee, the projectile (`uShlArrow`, `uShlHoming`) for arrows and spells.
-  - **Shooter of a projectile: not found, parked** (2026-10-10, two in-game runs, 86
+  - **Shooter of a projectile: not found, parked** (2026-10-10, three in-game runs, 168
     shells): no plain pointer to a character in the shell. Not needed to go on: combat can
     credit the nearest party member that is shooting.
   - Then: find the enemy list the pawns' AI reads (`sAISensorTarget`), and try to
