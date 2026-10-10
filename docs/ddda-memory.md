@@ -246,9 +246,15 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
     and `[vital+0x1B4]+0x40` their position;
   - all hits were called from **one hit-handling function**, at `+36E27D` (all victims) and
     `+36E31B` (a second vital: `uEm0200` takes each hit twice, on two different vital blocks);
-  - in that function `ebp` looks like the hit record: damage at `[ebp+0x7C]`, and
-    `[ebp+0x50]` an object tested by class (maybe the attacker; not checked). `edi+0xCCC` is
+  - in that function `ebp` is the hit record: damage at `[ebp+0x7C]`. `edi+0xCCC` is
     tested against `uEnemy`'s DTI (`0x19A1130`).
+- **The attacker is `[rec+0x50]`** (the same at `+0x54`), verified in game 2026-10-10 (50
+  hits against bandits, plain DDDA): the Arisen's melee gave `uPlayer`, a bandit's melee on a
+  pawn gave `uHumanEnemy`, bandits hitting barrels (`uOmObj7515`) gave `uHumanEnemy`. Ranged
+  hits give the **shell** instead (`uShlArrow`, `uShlHoming`, `uShlBase`), from either side.
+  Hits of 0.0 damage came with arg2 = 1 (probably blocked or guarded; not checked).
+  The shooter inside the shell: the log copies 0x800 bytes of it at the hit and lists the
+  characters it points to (`shooter:` lines). Built, not tested.
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),

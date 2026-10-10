@@ -33,6 +33,10 @@ uintptr_t g_resume = 0;  // ApplyDamage + 8
 // record (the caller's ebp: damage at +0x7C) and registers, to find the attacker.
 constexpr uintptr_t kHitCallers[2] = {0x36E27D, 0x36E31B};
 constexpr size_t kRecBytes = 0x300;
+// The attacker is [rec+0x50] (verified in game 2026-10-10): a character for melee, a shell
+// (uShl*) for arrows and spells. A copy of that object is kept too, to find the shooter.
+constexpr unsigned kRecAttacker = 0x50 / 4;
+constexpr size_t kSrcBytes = 0x800;
 enum Reg { kEdi, kEsi, kEbp, kEsp, kEbx, kEdx, kEcx, kEax, kRegs };
 
 struct Hit {
@@ -40,18 +44,19 @@ struct Hit {
     uint32_t vital, caller, arg2;
     float damage;
     uint32_t regs[kRegs];
-    bool hasRec;
+    bool hasRec, hasSrc;
     uint32_t rec[kRecBytes / 4];
+    uint32_t src[kSrcBytes / 4];
 };
 constexpr LONG kRing = 128;
 Hit g_ring[kRing];
 volatile LONG g_written = 0;
 LONG g_read = 0;
 
-bool CopyRec(uint32_t from, uint32_t* to) {
+bool CopyRec(uint32_t from, uint32_t* to, size_t n) {
     if (from < 0x10000) return false;
     __try {
-        memcpy(to, reinterpret_cast<const void*>(from), kRecBytes);
+        memcpy(to, reinterpret_cast<const void*>(from), n);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -68,9 +73,10 @@ void __stdcall Record(const uint32_t* frame) {
     h.caller = frame[8];
     memcpy(&h.damage, &frame[9], 4);
     h.arg2 = frame[10];
-    h.hasRec = false;
+    h.hasRec = h.hasSrc = false;
     for (uintptr_t c : kHitCallers)
-        if (h.caller == g_base + c) h.hasRec = CopyRec(frame[kEbp], h.rec);
+        if (h.caller == g_base + c) h.hasRec = CopyRec(frame[kEbp], h.rec, kRecBytes);
+    if (h.hasRec) h.hasSrc = CopyRec(h.rec[kRecAttacker], h.src, kSrcBytes);
     InterlockedExchange(&h.seq, n);
 }
 
@@ -184,6 +190,25 @@ void Poll() {
         if (h.hasRec)
             for (unsigned i = 0; i < kRecBytes / 4 && len < sizeof(line) - 80; ++i) add("rec+", i * 4, h.rec[i]);
         if (len) g_log("  refs:%s", line);
+        // A shell (arrow, spell): the characters its copy points to (shooter candidates).
+        char src[64] = "?";
+        if (h.hasSrc) ClassName(h.rec[kRecAttacker], src, sizeof(src));
+        if (h.hasSrc && strncmp(src, "uShl", 4) == 0) {
+            len = 0;
+            line[0] = 0;
+            for (unsigned i = 0; i < kSrcBytes / 4 && len < sizeof(line) - 80; ++i) {
+                uint32_t v = h.src[i];
+                if (v < 0x01000000 || (v >= g_base && v < g_base + 0x1800000)) continue;
+                char c[64];
+                ClassName(v, c, sizeof(c));
+                if (strcmp(c, "uPlayer") && strcmp(c, "uCmc") && strncmp(c, "uEm", 3) &&
+                    !strstr(c, "Enemy"))
+                    continue;
+                int k = sprintf_s(line + len, sizeof(line) - len, " shl+%X=%s:%08X", i * 4, c, v);
+                if (k > 0) len += k;
+            }
+            g_log("  shooter:%s", len ? line : " (no character in the shell's first 0x800 bytes)");
+        }
     }
 }
 
