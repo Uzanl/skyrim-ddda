@@ -406,8 +406,8 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     `spawn 2` created a wolf 4 m from the Arisen, on the generated ground. It was **not
     destroyed** (40 s), state 2 (active, bit 0x400), masks `+0x18` 0x80000000 / `+0x1C`
     0x16000000 with sUnit's D30/D34 all ones, but it never moved and was not in the AI target
-    list. Then DDDA showed **"Fatal error. Failed open file. ...
-ativePC\sound\se\em\e02    e0200\e0200.bmse 3"**: the wolf's resources had been released when the party left the
+    list. Then DDDA showed **"Fatal error. Failed open file.
+    `nativePC\sound\se\em\e02\e0200\e0200.bmse` 3"**: the wolf's resources had been released when the party left the
     wolves' area, and the new wolf asked for them. **An enemy's archive (model, sounds,
     parameters) must be loaded before it is created** (`cLayoutSetEnemy::cEmArcLoad`, vt
     `0x1593E78`); next, find how cEmArcLoad loads it and keep it loaded.
