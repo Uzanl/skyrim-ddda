@@ -253,8 +253,11 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   pawn gave `uHumanEnemy`, bandits hitting barrels (`uOmObj7515`) gave `uHumanEnemy`. Ranged
   hits give the **shell** instead (`uShlArrow`, `uShlHoming`, `uShlBase`), from either side.
   Hits of 0.0 damage came with arg2 = 1 (probably blocked or guarded; not checked).
-  The shooter inside the shell: the log copies 0x800 bytes of it at the hit and lists the
-  characters it points to (`shooter:` lines). Built, not tested.
+  The shooter inside the shell: the log copies 0x800 bytes of it at the hit. Seen in game
+  2026-10-10: no direct pointer to a character in 40 shells (pawn and enemy arrows, homing
+  spells). `uShl*` registers no properties of its own (only uModel's). Now the `shooter:`
+  line also lists pointers into a known character (`&Class+off`) and one pointer further
+  (`->`); built, not tested. Once, a homing spell's hit record had `rec+0x284` = uPlayer.
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),

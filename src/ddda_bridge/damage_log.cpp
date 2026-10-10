@@ -120,6 +120,28 @@ void ClassName(uint32_t obj, char* out, size_t cap) {
     strcpy_s(out, cap, buf);
 }
 
+bool IsChar(const char* c) {
+    return !strcmp(c, "uPlayer") || !strcmp(c, "uCmc") || !strncmp(c, "uEm", 3) || strstr(c, "Enemy");
+}
+
+// Characters seen in hits (victims, melee attackers), to recognise pointers into them.
+constexpr size_t kCharSize = 0x5930;  // pawn object stride (docs/ddda-memory.md)
+constexpr unsigned kDeepBytes = 0x100;
+uint32_t g_chars[32];
+unsigned g_charCount = 0;
+
+void Remember(uint32_t c) {
+    for (unsigned i = 0; i < g_charCount && i < 32; ++i)
+        if (g_chars[i] == c) return;
+    g_chars[g_charCount++ % 32] = c;
+}
+
+uint32_t KnownCharHolding(uint32_t v) {
+    for (unsigned i = 0; i < g_charCount && i < 32; ++i)
+        if (v > g_chars[i] && v < g_chars[i] + kCharSize) return g_chars[i];
+    return 0;
+}
+
 }  // namespace
 
 void Install(LogFn log, uintptr_t base) {
@@ -190,9 +212,13 @@ void Poll() {
         if (h.hasRec)
             for (unsigned i = 0; i < kRecBytes / 4 && len < sizeof(line) - 80; ++i) add("rec+", i * 4, h.rec[i]);
         if (len) g_log("  refs:%s", line);
-        // A shell (arrow, spell): the characters its copy points to (shooter candidates).
+        if (hasOwner && IsChar(cls)) Remember(owner);
         char src[64] = "?";
-        if (h.hasSrc) ClassName(h.rec[kRecAttacker], src, sizeof(src));
+        if (h.hasRec) ClassName(h.rec[kRecAttacker], src, sizeof(src));
+        if (IsChar(src)) Remember(h.rec[kRecAttacker]);
+        // A shell (arrow, spell): characters its copy points to (shooter candidates), directly,
+        // into a known character (party and anyone seen in a hit) or one pointer further on.
+        // 2026-10-10: no direct pointer in the first 0x800 bytes of 40 shells.
         if (h.hasSrc && strncmp(src, "uShl", 4) == 0) {
             len = 0;
             line[0] = 0;
@@ -201,13 +227,30 @@ void Poll() {
                 if (v < 0x01000000 || (v >= g_base && v < g_base + 0x1800000)) continue;
                 char c[64];
                 ClassName(v, c, sizeof(c));
-                if (strcmp(c, "uPlayer") && strcmp(c, "uCmc") && strncmp(c, "uEm", 3) &&
-                    !strstr(c, "Enemy"))
-                    continue;
-                int k = sprintf_s(line + len, sizeof(line) - len, " shl+%X=%s:%08X", i * 4, c, v);
+                int k = 0;
+                if (IsChar(c)) {
+                    k = sprintf_s(line + len, sizeof(line) - len, " shl+%X=%s:%08X", i * 4, c, v);
+                } else if (uint32_t base = KnownCharHolding(v)) {
+                    ClassName(base, c, sizeof(c));
+                    k = sprintf_s(line + len, sizeof(line) - len, " shl+%X=&%s:%08X+%X", i * 4, c, base, v - base);
+                } else {
+                    uint32_t next[kDeepBytes / 4];
+                    if (!Read(v, next, sizeof(next))) continue;
+                    for (unsigned j = 0; j < kDeepBytes / 4; ++j) {
+                        uint32_t w = next[j];
+                        if (w < 0x01000000 || (w >= g_base && w < g_base + 0x1800000)) continue;
+                        char d[64];
+                        ClassName(w, d, sizeof(d));
+                        if (!IsChar(d)) continue;
+                        ClassName(v, c, sizeof(c));
+                        k = sprintf_s(line + len, sizeof(line) - len, " shl+%X->%s:%08X+%X=%s:%08X", i * 4, c,
+                                      v, j * 4, d, w);
+                        break;
+                    }
+                }
                 if (k > 0) len += k;
             }
-            g_log("  shooter:%s", len ? line : " (no character in the shell's first 0x800 bytes)");
+            g_log("  shooter:%s", len ? line : " (no character found)");
         }
     }
 }
