@@ -300,3 +300,11 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   13, `+0x0C` mask 7, **`+0x20` the owner's position, global** (wolf local 633/7559 ->
   10635/127568), `+0x30` a unit direction, `+0x40` 100 (radius?), `+0x44` group, `+0x4C` 1,
   `+0x50` 1000 (range?), `+0x58` owner, `+0x5C` 3.
+
+**Hijacked enemy (built 2026-10-10, not tested):** `src/ddda_bridge/hijack.cpp`, line `hijack`
+in `ddda_experiment.txt`, bridge session only. Takes the nearest active group-3 entry's
+owner (up to 500 m), hooks its class's move() (slot 8, vtable and code range checked), and
+after each move() writes its x/z to a spot 6 m in front of the Arisen (camera -> Arisen
+direction; height set once to the Arisen's + 50 cm), syncing its scenery adjust's position
+copies if one is found in the object by vtable (`0x159704C`). Its AI keeps running. Log
+lines `hijack:`; hits on it show in the damage log.

@@ -20,6 +20,7 @@
 #include "isolate.h"
 #include "relight.h"
 #include "damage_log.h"
+#include "hijack.h"
 
 #if !defined(_M_IX86)
 #error "DDDA is 32-bit; build this DLL for x86."
@@ -1249,6 +1250,7 @@ void PollExperiment(const wchar_t* folder) {
     float lightScale = 1.0f;
     unsigned lightMask = ~0x10u;
     bool learnPaused = false;  // "nolearn": see isolate::SetLearnPaused
+    bool hijackLine = false;   // "hijack": see hijack.h (bridge session only)
     if (_wfopen_s(&f, path, L"r") == 0 && f) {
         if (!fgets(line, sizeof(line), f)) line[0] = 0;
         char more[64];
@@ -1261,6 +1263,7 @@ void PollExperiment(const wchar_t* folder) {
             sscanf_s(l, "lightscale %f", &lightScale);
             sscanf_s(l, "lightmask %x", &lightMask);
             if (strncmp(l, "nolearn", 7) == 0) learnPaused = true;
+            if (strncmp(l, "hijack", 6) == 0) hijackLine = true;
         };
         parse(line);
         while (fgets(more, sizeof(more), f)) parse(more);
@@ -1268,6 +1271,7 @@ void PollExperiment(const wchar_t* folder) {
     }
     relight::SetOptions(lightOn, fogOn, lightScale, lightMask);
     isolate::SetLearnPaused(learnPaused);
+    hijack::SetEnabled(hijackLine && g_session);
     static int lastPoseDelay = INT_MIN;  // not kPoseLatch (-1): that is a valid setting
     if (poseDelay != lastPoseDelay) {
         lastPoseDelay = poseDelay;
@@ -2003,6 +2007,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
     relight::Init(&Log, g_base);
     relight::Install();
     damagelog::Install(&Log, g_base);
+    hijack::Init(&Log, g_base);
     OpenCameraMapping();
     OpenNamesMapping();
     OpenGroundMapping();
@@ -2029,6 +2034,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
         AcquireSRWLockShared(&g_lock);
         memcpy(snap, g_captured, sizeof(snap));
         ReleaseSRWLockShared(&g_lock);
+        hijack::Poll(snap[bridge::kArisen].seen ? snap[bridge::kArisen].pos : nullptr);
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
         Publish(hooks, snap, now.QuadPart);

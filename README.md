@@ -105,7 +105,7 @@ Skyrim shows the result. The two processes talk through shared memory
   pawns was considered and dropped.
 
 Next, in order:
-0. Combat recon: the target list is mapped (docs/ddda-memory.md, "AI target list": group 3 = enemies, 1 Arisen, 2 pawns; each entry keeps its owner's global position); next the hijacked-enemy test (first bullet above).
+0. Combat recon: the target list is mapped (docs/ddda-memory.md, "AI target list": group 3 = enemies, 1 Arisen, 2 pawns; each entry keeps its owner's global position); next the hijacked-enemy test (built and installed 2026-10-10, `hijack` in ddda_experiment.txt; not tested) (first bullet above).
 0b. The void bug above, parked by the user (fix 1 first: protection until the target's tiles came from the overlay).
 1. Interiors, polish: measure the entry with the arena worker, larger interiors (dungeons are not tested; the graph inside a small house splits into
    islands around furniture), interior cells connected by load doors.
@@ -212,6 +212,7 @@ src/ddda_bridge/             the DDDA-side DLL, built as dinput8.dll (x86):
   isolate.cpp                  party-only rendering (learns the party's vertex buffers)
   relight.cpp                  Skyrim's sun, ambient and fog on DDDA's uSky* lights
   damage_log.cpp               combat recon: logs each hit's target, damage and HP (log-only)
+  hijack.cpp                   combat test: holds DDDA's nearest enemy in front of the Arisen
 src/skse_plugin/plugin.cpp   Skyrim SKSE plugin (x64): reads the party, sends Skyrim's camera and
                              lighting, switches to an interior's arena mapping
 src/skse_ghosts/             DDDAGhosts (CommonLibSSE, build_skse.bat): ground raycasts and
