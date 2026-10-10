@@ -353,5 +353,22 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     `+0xAA2D1`/`+0xAA321`), and a "dynamic" one through `+0x35F700` and `+0x360450`
     (cLayoutSetDynamic's slot 6) called from a unit's move() (`+0x9BDABC`): enemies that
     appear during play.
-  - Not known yet: whether the enemy's archive (model, motion, parameters, `cEmArcLoad`)
-    must be loaded first; how the placement record sets the position.
+  - **Setting the new enemy up** (static, 2026-10-10): the placement record's vfunc `+0x20`
+    (slot 8) takes the unit (thiscall, `ret 4`), in three levels:
+    - `cSetInfoEnemy` (vt `0x1597258`) slot 8 `+0x3A0000`: calls the level below, checks the
+      unit is a uEnemy, calls the unit's vfunc `+0x144` with the record's position, copies
+      about 20 record fields (`+0xE0..+0x107`) into the unit (`+0x2B90`, `+0x5C14..+0x5E74`,
+      ...) and the position again as a home point (`+0xE50`);
+    - `+0x3A4B80`: more record fields (`+0x74..+0x90`) into `+0x209E..+0x20C4`;
+    - **`cSetInfoCoord`** (vt `0x15970B4`) slot 8 `+0x39F230`: `mOrder` `+0x60` -> unit `+0x38`,
+      **`mPosition` `+0x30` -> unit `+0x40`**, `mAngle` `+0x40` -> rotation (`+0x9EAE30`),
+      `mScale` `+0x50` -> unit `+0x60`, then the unit's vfuncs `+0x50` and `+0x54`.
+      (Properties from `tools/recon/sprops.py 015970B4`: also mSetID, mName, mDrawDistance
+      `+0x64`, mIsOnSplitAreaIgnore `+0x68`.)
+  - After that, `+0x361970(eax = layout data, unit)` does more setup (not read).
+  - **Plan for a spawn test:** remember the arguments of a real call to `+0x3613D0` (layout
+    object, data, record holder) for a wolf, then call it again with a copy of the record
+    whose `mPosition` is next to the Arisen. The game's own code then creates and sets up
+    the wolf. Not known: whether the wolf's archive must be loaded (`cEmArcLoad`; a wolf
+    area has it loaded), and whether a second enemy from the same placement confuses the
+    lot manager.
