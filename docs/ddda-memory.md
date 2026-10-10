@@ -371,7 +371,16 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     `cSetInfoEnemy0200` records (wolves; `+0x0C` the name "em0200", **`+0x30` the position in
     global coordinates**, `+0x44` an angle, `+0x50` scale 1, several fields pointing inside
     the record itself, e.g. `+0xE0` = record + 0xA0).
-  - **Spawn test (built 2026-10-10, not tested):** `src/ddda_bridge/spawn.cpp`. It hooks
+  - **Spawn test: the creation works** (2026-10-10 20:31, bridge session without Skyrim,
+    "hold" on, save near wolves): 10 real wolves were created at load and captured; `spawn 1`
+    logged `created; unit uEm0200` at local (1502, 33619, 8781), 4 m from the Arisen
+    (1825, 33569, 8546): the global record position became the right local one by itself.
+    It never moved and did not appear in the AI target list. Within about 30 s **every wolf,
+    the 10 real ones and ours, was destroyed** (vtable back to `MtObject`, position unchanged:
+    they did not fall; no hits logged). The user: in the bridge session no enemy is ever
+    seen. Suspects: "hold" (party asleep) or the overlay's tile archives. In plain DDDA the
+    same wolves stay.
+  - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
     `ddda_experiment.txt` (bridge session only) calls it once from the Arisen's move() with a
