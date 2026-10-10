@@ -105,7 +105,7 @@ Skyrim shows the result. The two processes talk through shared memory
   pawns was considered and dropped.
 
 Next, in order:
-0. Combat recon: the target list's layout is read statically (docs/ddda-memory.md, "AI target list"); next a live dump with `tools/recon/sensortargets.py` near enemies, then the hijacked-enemy test (first bullet above).
+0. Combat recon: the target list is mapped (docs/ddda-memory.md, "AI target list": group 3 = enemies, 1 Arisen, 2 pawns; each entry keeps its owner's global position); next the hijacked-enemy test (first bullet above).
 0b. The void bug above, parked by the user (fix 1 first: protection until the target's tiles came from the overlay).
 1. Interiors, polish: measure the entry with the arena worker, larger interiors (dungeons are not tested; the graph inside a small house splits into
    islands around furniture), interior cells connected by load doors.
