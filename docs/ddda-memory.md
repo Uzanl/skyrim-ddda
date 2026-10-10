@@ -382,10 +382,25 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     destroyed within 11 s too, so "hold" is not the cause (the user then fell into the void:
     without "hold" the party stood over the overlay's ground). The overlay only replaces each
     tile's `h` collision (`arc.rebuild`, other entries kept).
-  - **Destroy log** (built 2026-10-10, not tested): the spawn log also hooks uEnemy's
+  - **Destroy log** (verified in game 2026-10-10): the spawn log also hooks uEnemy's
     destructor `+0x6A8730` (thiscall; 10 bytes `53 56 8B F1 8B 8E F4 5F 00 00` replayed) and
-    logs `destroy:` with class, position and the callers, to find what deletes them. The
-    stack is now copied in 64-byte pieces.
+    logs `destroy:` with class, position and callers (the stack is copied in 64-byte pieces).
+    Every destruction came from sUnit's per-line loop (`+0x9B74EA`, from the main frame
+    `+0x1DFD9`): a unit's state is the low 3 bits of `+4` (1 new, 2 active, 3 kill requested,
+    4 dying: vfunc `+0x44` then delete). The kill request is written inline in ~80 places
+    (`and eax, 0xFFFFFFFB; or eax, 3; mov [reg+4], eax`).
+  - Timeline in a bridge session: tiles read from the overlay, wolves created ~5 s later,
+    **all destroyed ~2 s after that**, as soon as the world ran.
+  - **Cause: the overlay's generated collision** (2026-10-10, overlay files moved aside and
+    the save reloaded in game, then put back): without the overlay's 22 waypoint graphs
+    around the wolves they still died; without its 25 collision archives they lived (the
+    original ground there). Likely DDDA removes an enemy whose placement has no matching
+    ground. Ideas: generated tiles could keep DDDA's original ground under enemy
+    placements, or stand-ins get a placement on the generated ground.
+  - **Spawn on the original ground (20:45): the wolf lived, moved 13 m with its own AI and
+    was killed by arrows from the party** (727 and 395 damage, `uShlArrow` attacker), its
+    corpse removed 4 s later, the normal end of a dead enemy. So DDDA's AI treats a spawned
+    enemy as a real one.
   - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
