@@ -302,6 +302,7 @@ void Capture(void* obj, bool isPlayer) {
         return;
     }
     if (role != bridge::kArisen) isolate::NotePawn(self);
+    damagelog::NoteParty(role, static_cast<uint32_t>(self));
     uint32_t status;
     float hp[2] = {};
     bool hpValid = ReadU32(self + kStatus, &status) && ReadFloats(status + kHp, hp, 2) && SaneHp(hp);

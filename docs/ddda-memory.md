@@ -260,7 +260,10 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   -> `cObjCollision::NodeHitInfo` (what the shell touched, not its shooter: once a pawn,
   on an arrow that hurt the Arisen). So the shooter is not a plain pointer (maybe a handle
   or ID); parked, a fallback is enough for combat (the nearest party member shooting).
-  Once, a homing spell's hit record had `rec+0x284` = uPlayer.
+  Once, a homing spell's hit record had `rec+0x284` = uPlayer, and once a `uShlBase` that
+  killed a wolf had `rec+0x98` = a pawn (`uCmc`). Third version (built, not tested): the
+  party's objects come from the move() hooks, so pointers at or into any party member count
+  (`shooter:` names the role, e.g. `main pawn+2600`).
 - Enemy and targeting classes (from `tools/recon/sdti.py`, DTI / vtable):
   `uEnemy` (019A1130 / 015DF2A8), `uHumanEnemy` (019A3DB4 / 015EF670),
   `cCharParamEnemy`, `sAISensorTarget` (0198AC58 / 01559DF8, the AI's target sensor),

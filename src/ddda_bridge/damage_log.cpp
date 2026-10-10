@@ -136,13 +136,29 @@ void Remember(uint32_t c) {
     g_chars[g_charCount++ % 32] = c;
 }
 
+volatile uint32_t g_party[4];
+const char* const kRoleNames[4] = {"Arisen", "main pawn", "hired 1", "hired 2"};
+
+// Party role whose object holds v (at or inside it), or -1.
+int PartyRole(uint32_t v) {
+    for (int r = 0; r < 4; ++r)
+        if (g_party[r] && v >= g_party[r] && v < g_party[r] + kCharSize) return r;
+    return -1;
+}
+
 uint32_t KnownCharHolding(uint32_t v) {
+    for (uint32_t c : g_party)
+        if (c && v > c && v < c + kCharSize) return c;
     for (unsigned i = 0; i < g_charCount && i < 32; ++i)
         if (v > g_chars[i] && v < g_chars[i] + kCharSize) return g_chars[i];
     return 0;
 }
 
 }  // namespace
+
+void NoteParty(int role, uint32_t obj) {
+    if (role >= 0 && role < 4) g_party[role] = obj;
+}
 
 void Install(LogFn log, uintptr_t base) {
     g_log = log;
@@ -218,7 +234,8 @@ void Poll() {
         if (IsChar(src)) Remember(h.rec[kRecAttacker]);
         // A shell (arrow, spell): characters its copy points to (shooter candidates), directly,
         // into a known character (party and anyone seen in a hit) or one pointer further on.
-        // 2026-10-10: no direct pointer in the first 0x800 bytes of 40 shells.
+        // 2026-10-10: no direct pointer in the first 0x800 bytes of 40 shells; the party's
+        // objects (from the move() hooks) now count as known too.
         if (h.hasSrc && strncmp(src, "uShl", 4) == 0) {
             len = 0;
             line[0] = 0;
@@ -228,7 +245,10 @@ void Poll() {
                 char c[64];
                 ClassName(v, c, sizeof(c));
                 int k = 0;
-                if (IsChar(c)) {
+                if (int r = PartyRole(v); r >= 0) {
+                    k = sprintf_s(line + len, sizeof(line) - len, " shl+%X=%s+%X", i * 4, kRoleNames[r],
+                                  v - g_party[r]);
+                } else if (IsChar(c)) {
                     k = sprintf_s(line + len, sizeof(line) - len, " shl+%X=%s:%08X", i * 4, c, v);
                 } else if (uint32_t base = KnownCharHolding(v)) {
                     ClassName(base, c, sizeof(c));
@@ -240,9 +260,14 @@ void Poll() {
                         uint32_t w = next[j];
                         if (w < 0x01000000 || (w >= g_base && w < g_base + 0x1800000)) continue;
                         char d[64];
+                        ClassName(v, c, sizeof(c));
+                        if (int pr = PartyRole(w); pr >= 0) {
+                            k = sprintf_s(line + len, sizeof(line) - len, " shl+%X->%s:%08X+%X=%s+%X", i * 4, c,
+                                          v, j * 4, kRoleNames[pr], w - g_party[pr]);
+                            break;
+                        }
                         ClassName(w, d, sizeof(d));
                         if (!IsChar(d)) continue;
-                        ClassName(v, c, sizeof(c));
                         k = sprintf_s(line + len, sizeof(line) - len, " shl+%X->%s:%08X+%X=%s:%08X", i * 4, c,
                                       v, j * 4, d, w);
                         break;
