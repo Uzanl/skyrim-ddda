@@ -331,7 +331,27 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
 - `cSetInfoEnemy` (vt `0x1597258`) and per-type `cSetInfoEnemyNNNN`: placement records.
 - `uEnemy`'s constructor: `+0x6A7B60`, new object in `edi`; calls the base constructor
   `+0x44A100`, then writes uEnemy's vtable (`0x15DF2A8`). 30+ enemy constructors call it.
-  **Spawn log** (`src/ddda_bridge/spawn_log.cpp`, log-only, also in plain DDDA; built and
-  installed 2026-10-10, not tested): hooks its entry and logs each enemy (`spawn:` with
-  class and position 0.5 s later) and the return addresses found on the stack (`callers:`),
-  to find the function that creates an enemy.
+  **Spawn log** (`src/ddda_bridge/spawn_log.cpp`, log-only, also in plain DDDA): hooks its
+  entry and logs each enemy (`spawn:` with class and position 0.5 s later) and the return
+  addresses found on the stack (`callers:`). **Verified in game 2026-10-10** (plain DDDA,
+  the user fought): 113 enemies (69 `uEm0200` wolves, 26 `uEm0400`, a few others); 18 with a
+  call chain (the other 95 stack copies failed: the 1 KB read probably crossed the end of
+  the stack; read in smaller pieces next time).
+- **How an enemy is created (from those chains, read statically):**
+  - `+0x3613D0` (in cLayoutSetEnemy's code; esi = the layout object, `[ebp+8]` the placement
+    data, `[ebp+0x10]+8` the placement record, checked to be a `cSetInfoEnemy`; `ret 0xC`)
+    calls at `+0x361448`
+    **`+0x33E00` = create an enemy unit**: `eax` = move line (15), `ecx` = the enemy class's
+    DTI (`[layout+4]`), `edi` = where to store the new unit, stack: `[0x18FA4B0]`,
+    `0x80000000`, `0x16000000` (the move mask every character has at `+0x1C`), 1, 0;
+    `ret 0x14`. It checks the DTI is a uEnemy (`[0x19A1134]`), moves some enemy kinds to
+    another line (a table of 37 ids, `DTI+0x1C`), calls the generic unit creation
+    `+0x21FE0` and returns the new unit in `[edi]`.
+  - Then the caller hands the unit to the placement record (its vfunc `+0x20`, likely
+    position and setup) and copies layout fields into it (`+0x20EC`, `+0x20F8`, ...).
+  - Two paths reach `+0x3613D0`: area loading through `+0x361060` (from the lot manager,
+    `+0xAA2D1`/`+0xAA321`), and a "dynamic" one through `+0x35F700` and `+0x360450`
+    (cLayoutSetDynamic's slot 6) called from a unit's move() (`+0x9BDABC`): enemies that
+    appear during play.
+  - Not known yet: whether the enemy's archive (model, motion, parameters, `cEmArcLoad`)
+    must be loaded first; how the placement record sets the position.
