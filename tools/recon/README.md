@@ -45,6 +45,7 @@ drain events). An earlier detach without that crashed the game once.
 | `sdis.py ADDR\|func\|calls\|xref\|vtref` | **Static** (reads `DDDA.exe` from disk, game not needed): disassembly, a function's calls, call/jmp xrefs, dword refs |
 | `sdti.py REGEX` | **Static.** Class name to MtDTI to vtables |
 | `hfdump.py` / `sbcscan.py` | Live sCollision height-field list / census of loaded collision tiles, waypoint graphs and navmeshes (read-only) |
+| `sensortargets.py [SCAN]` | The AI's target list (sAISensorTarget): every entry's class, flags, group and the characters it points to (read-only) |
 | `sprops.py VTABLE` | **Static.** MtDTI property names and field offsets (vtable slot 3) |
 | `skyrim/addrlib.py ID...` / `skyrim/sky.py` | Skyrim 1.7.104 Address Library (format 5) lookups; live Skyrim reads |
 

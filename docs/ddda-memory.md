@@ -275,3 +275,18 @@ constant 1.0 while linked (found with tools/recon/fadewatch.py and hwbp.py).
   `cAISensorTarget`, `sLockOnManager::cLockOnTarget`, `cTargetEnemy`,
   `cLayoutSetEnemy` and `cSetInfoEnemy` (enemy placement in a layout: a lead for spawning),
   `cLinkUnitEnemy`.
+
+## AI target list: sAISensorTarget (static, 2026-10-10)
+
+`[0x18D9274]` (vtable `0x1559DF8`, constructor `+0x15120`). Read from the code, not yet live:
+- `+0x20` pending array (count `+0x24`, items `+0x30`): moved into the live list by the
+  update (`+0x15220`, vtable slot 6), which sets bit `0x10` in each entry's `+4`.
+- `+0x34` live array (count `+0x38`, items `+0x44`), sorted by group; `+0x48`: 13 dwords,
+  first index of each group (-1 = empty).
+- Entry: `+0x04` flags (bit 0 skipped, bit 1 active), `+0x0C` mask, `+0x44` group (0..12).
+- Register: `+0x153F0` (eax = manager, entry pushed), called e.g. from `+0x1B2490`, which
+  then sets bit `0x4`. Query: `+0x15460(query*)` walks the groups in a query mask and
+  filters by the entry's `+0x0C`; an AI caller at `+0x457A12`.
+- Entry classes are probably `cAISensorTarget*` (`...Unit` vt `0x1579A20`, `...Npc`
+  `0x1579870`, `...Group` `0x15797C8`, `...Ptr` `0x15796D0`). Live dump:
+  `tools/recon/sensortargets.py` (read-only; not run yet).
