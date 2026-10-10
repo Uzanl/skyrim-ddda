@@ -366,6 +366,16 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
       (Properties from `tools/recon/sprops.py 015970B4`: also mSetID, mName, mDrawDistance
       `+0x64`, mIsOnSplitAreaIgnore `+0x68`.)
   - After that, `+0x361970(eax = layout data, unit)` does more setup (not read).
+  - Live (2026-10-10, bridge session near wolves, `tools/recon/findclass.py`): 76
+    `cLayoutSetEnemy` objects (stride 0xC0; `+4` an `rLayout`, `+0x74` a `cGroupParam`), 61
+    `cSetInfoEnemy0200` records (wolves; `+0x0C` the name "em0200", **`+0x30` the position in
+    global coordinates**, `+0x44` an angle, `+0x50` scale 1, several fields pointing inside
+    the record itself, e.g. `+0xE0` = record + 0xA0).
+  - **Spawn test (built 2026-10-10, not tested):** `src/ddda_bridge/spawn.cpp`. It hooks
+    `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
+    object, layout, holder) with a copy of its record, and on each change of `spawn N` in
+    `ddda_experiment.txt` (bridge session only) calls it once from the Arisen's move() with a
+    copy whose `+0x30` is 4 m in front of the Arisen (local + tile origin). Log `spawn:`.
   - **Plan for a spawn test:** remember the arguments of a real call to `+0x3613D0` (layout
     object, data, record holder) for a wolf, then call it again with a copy of the record
     whose `mPosition` is next to the Arisen. The game's own code then creates and sets up
