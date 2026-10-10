@@ -401,6 +401,16 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     was killed by arrows from the party** (727 and 395 damage, `uShlArrow` attacker), its
     corpse removed 4 s later, the normal end of a dead enemy. So DDDA's AI treats a spawned
     enemy as a real one.
+  - **Spawn while linked to Skyrim (20:54):** the record was captured at the save spot (the
+    wolves there died as usual), then the link moved the party to the Riverwood mapping and
+    `spawn 2` created a wolf 4 m from the Arisen, on the generated ground. It was **not
+    destroyed** (40 s), state 2 (active, bit 0x400), masks `+0x18` 0x80000000 / `+0x1C`
+    0x16000000 with sUnit's D30/D34 all ones, but it never moved and was not in the AI target
+    list. Then DDDA showed **"Fatal error. Failed open file. ...
+ativePC\sound\se\em\e02    e0200\e0200.bmse 3"**: the wolf's resources had been released when the party left the
+    wolves' area, and the new wolf asked for them. **An enemy's archive (model, sounds,
+    parameters) must be loaded before it is created** (`cLayoutSetEnemy::cEmArcLoad`, vt
+    `0x1593E78`); next, find how cEmArcLoad loads it and keep it loaded.
   - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
