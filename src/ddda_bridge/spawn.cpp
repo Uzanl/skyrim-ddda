@@ -541,7 +541,11 @@ bool SyntheticTick(uintptr_t arisen) {
 constexpr LONG kHumanKind = 0x6E5, kCreatureKind = 0x49;
 // The NPC flickered in and out of the published list (2026-10-10): 3 s before removing.
 constexpr ULONGLONG kNpcGoneMs = 3000;
-constexpr uintptr_t kStatusPtr = 0x4BC, kStatusToVital = 0x1D0, kVitalOwnerOff = 0x1B4, kVitalMax = 0xC;
+constexpr uintptr_t kStatusPtr = 0x4BC, kStatusToVital = 0x1D0, kVitalOwnerOff = 0x1B4, kVitalHpOff = 8,
+                    kVitalMax = 0xC;
+// Enemies: [unit+0x1D18] is a list of their vital blocks (read live 2026-10-10 on a wolf
+// stand-in: [+0] and [+4], both owned by the unit, 800 max HP; wolves take each hit twice).
+constexpr uintptr_t kVitalList = 0x1D18;
 constexpr int kMaxStandins = static_cast<int>(bridge::kMaxNpcs);
 constexpr uintptr_t kAdjCopies[3] = {0x120, 0x130, 0x140}, kAdjVelocity = 0x150;
 constexpr uintptr_t kScrAdjustVt = 0x119704C;  // cScrAdjust, image-relative
@@ -675,31 +679,44 @@ bool ReadNpcs(bridge::Npcs* out) {
     return false;
 }
 
-// The stand-in's vital block: seen in a hit, or the party's layout ([unit+0x4BC] + 0x1D0)
-// when its owner field points back at the unit.
-uint32_t VitalOf(const Standin& s) {
-    if (s.vital) return s.vital;
-    uint32_t st = U32(s.unit + kStatusPtr);
-    if (!st) return 0;
-    uint32_t v = st + kStatusToVital;
-    return U32(v + kVitalOwnerOff) == s.unit ? v : 0;
+// The stand-in's living vital blocks (owner field +0x1B4 = the unit, HP > 0): the one seen
+// in a hit, the enemy list at [unit+0x1D18], and the party's layout ([unit+0x4BC] + 0x1D0).
+int VitalsOf(const Standin& s, uint32_t* out, int cap) {
+    uint32_t cand[10] = {s.vital};
+    int n = 1;
+    if (uint32_t list = U32(s.unit + kVitalList))
+        for (uint32_t k = 0; k < 8; ++k) cand[n++] = U32(list + k * 4);
+    if (uint32_t st = U32(s.unit + kStatusPtr)) cand[n++] = st + kStatusToVital;
+    int found = 0;
+    for (int i = 0; i < n && found < cap; ++i) {
+        uint32_t v = cand[i];
+        float hp = 0;
+        if (!v || U32(v + kVitalOwnerOff) != s.unit || !Read(v + kVitalHpOff, &hp, 4) || !(hp > 0)) continue;
+        bool dup = false;
+        for (int j = 0; j < found; ++j) dup |= out[j] == v;
+        if (!dup) out[found++] = v;
+    }
+    return found;
 }
 
 void RemoveStandin(Standin& s, const char* why) {
     if (s.unit && U32(s.unit) == s.vt) {
-        uint32_t vital = VitalOf(s);
-        if (!vital) {
+        uint32_t vitals[4];
+        int n = VitalsOf(s, vitals, 4);
+        if (!n) {
             Event("kept", s, "no vital block to kill it with (left alive)");
             s.lastSeen = GetTickCount64();  // try again later
             return;
         }
-        float max = 0;
-        Read(vital + kVitalMax, &max, 4);
         InterlockedExchange(&s.removing, 1);
-        __try {
-            damagelog::Apply(vital, (max > 0 && max < 1.0e6f ? max : 10000.0f) * 10.0f);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            Event("removed", s, "FAULT in the lethal hit");
+        for (int i = 0; i < n; ++i) {
+            float max = 0;
+            Read(vitals[i] + kVitalMax, &max, 4);
+            __try {
+                damagelog::Apply(vitals[i], (max > 0 && max < 1.0e6f ? max : 10000.0f) * 10.0f);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                Event("removed", s, "FAULT in the lethal hit");
+            }
         }
     }
     Event("removed", s, why);

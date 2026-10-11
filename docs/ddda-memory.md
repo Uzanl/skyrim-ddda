@@ -503,7 +503,7 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   s later created a `uHumanEnemy` (1300 HP, like the bandits)**, killed by the party in about
   1 s. So any of the 112 kinds can be created anywhere.
 
-## Stand-ins for Skyrim NPCs (built 2026-10-10, not tested)
+## Stand-ins for Skyrim NPCs (2026-10-10, verified in game)
 
 - **Skyrim side** (`src/skse_ghosts/plugin.cpp`, `PublishNpcs`, every update while the
   terrain link is on): living actors hostile to the player within 40 m (process lists' high
@@ -531,3 +531,12 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   vital block seen in a hit, or `[unit+0x4BC]+0x1D0` when its owner `+0x1B4` matches), 3 s
   before removing, the live tile origin, and NPC heights mapped from the Dragonborn's feet
   (`cmd.body`).
+- **Second test (2026-10-10 22:09, verified in game; the user: "funcionou, eles detectaram"):**
+  three hostile NPCs, three stand-ins. The two bandits' stand-ins (humans) took 31 and 11
+  hits from the pawns with their HP staying 1300/1300 (damage zeroed, summed), and were
+  removed with the lethal hit when the bandits were gone: no crash. The third NPC (a
+  creature) got a wolf stand-in that was never hit, so no vital block was known and it was
+  left alive. Found live on it: its vital block (800/800) is not reachable from
+  `[unit+0x4BC]`; **`[unit+0x1D18]` points to a list of the enemy's vital blocks** (`[+0]` and
+  `[+4]`, both owned by the unit). Removal now hits every living vital block it finds there
+  (built, not tested).
