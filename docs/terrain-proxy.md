@@ -373,3 +373,16 @@ Now:
 4. Navigation hooks.
 5. Streaming window: about 128 m (Skyrim only has physics in loaded cells, about ±145 m
    with uGridsToLoad=5, so 500 m is not available).
+
+## Streamer speed in game (2026-10-10)
+
+In a long session the streamer took 10-20 s per tile (once a single tile ran for over 4
+minutes), so the party reached places before their ground was generated and the pawns could
+not follow until the tiles were done and the save reloaded (the user saw exactly that).
+The same tiles took 0.7 s each when generated from a console (`gen_collision` + `gen_way`,
+dry run, while both games were running), so the code is not the cost. The streamer runs as a
+windowless `pythonw` started by the DDDA bridge, which Windows 11 may power-throttle
+(EcoQoS). `stream.py` now opts out at start (`full_speed`: `SetProcessInformation`
+ProcessPowerThrottling, execution speed and timer resolution not throttled, and above-normal
+priority) and logs `power throttling off`; the tile line also gives the collision's share.
+Applied to the running streamer at 22:46: see below for the measured effect.

@@ -627,6 +627,25 @@ def single_instance():
     return C.get_last_error() != 183  # ERROR_ALREADY_EXISTS
 
 
+def full_speed():
+    """Opts this process out of Windows 11's power throttling (EcoQoS). Started by the DDDA
+    bridge without a window, the streamer took 10-20 s per tile in game (2026-10-10) while the
+    same tile took 0.7 s from a console: windowless background processes may be put on
+    efficiency cores at low clock. Returns a note for the log."""
+    import ctypes as C
+
+    class State(C.Structure):  # PROCESS_POWER_THROTTLING_STATE
+        _fields_ = [("Version", C.c_ulong), ("ControlMask", C.c_ulong), ("StateMask", C.c_ulong)]
+
+    k = C.WinDLL("kernel32", use_last_error=True)
+    k.GetCurrentProcess.restype = C.c_void_p
+    k.SetProcessInformation.argtypes = [C.c_void_p, C.c_int, C.c_void_p, C.c_ulong]
+    s = State(1, 0x1 | 0x4, 0)  # execution speed and timer resolution: not throttled
+    ok = k.SetProcessInformation(k.GetCurrentProcess(), 4, C.byref(s), C.sizeof(s))  # ProcessPowerThrottling
+    k.SetPriorityClass(C.c_void_p(k.GetCurrentProcess()), 0x8000)  # ABOVE_NORMAL_PRIORITY_CLASS
+    return "power throttling off, priority above normal" if ok else f"power throttling not changed (error {C.get_last_error()})"
+
+
 class Interiors(threading.Thread):
     """Builds an interior's arena as soon as the player enters it (DDDAGhosts' current.txt)
     and writes its mapping; removes the mapping on the way out. The main loop reads the
@@ -723,6 +742,7 @@ def run(start=None):
         sys.stdout = sys.stderr = open(os.path.join(HERE, "stream.log"), "a", buffering=1, encoding="utf-8")
         print("", flush=True)
         print(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} streamer started", flush=True)
+    print(full_speed(), flush=True)
     cfg = load_config()
     H = make_height(cfg)
     st = load_state(cfg)
@@ -812,6 +832,7 @@ def run(start=None):
         rooms.overwritten((m, n))
         t0 = time.time()
         c = gen_collision(m, n, H)
+        tc = time.time() - t0
         if havok.current_cell():  # the player went inside meanwhile: the interior first, this tile later
             print(f"{time.strftime('%H:%M:%S')} {m}m{n}n graph postponed (interior)", flush=True)
             continue
@@ -821,7 +842,7 @@ def run(start=None):
         st["done"] = sorted(done)
         save_state(st)
         print(f"{time.strftime('%H:%M:%S')} {m}m{n}n collision {'ok' if c else '--'} graph {'ok' if w else '--'} "
-              f"{dt:.1f}s (distance {max(abs(m - here[0]), abs(n - here[1]))}, {len(todo) - 1} left)",
+              f"{dt:.1f}s (collision {tc:.1f}s; distance {max(abs(m - here[0]), abs(n - here[1]))}, {len(todo) - 1} left)",
               flush=True)
 
 
