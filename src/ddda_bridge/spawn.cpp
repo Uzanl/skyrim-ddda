@@ -78,6 +78,7 @@ struct Result {
     uint32_t unit, record;
     float pos[3];
     bool fault;
+    uint32_t faultAt;  // exception address when fault
     const char* why;  // set when the spawn did not run
 };
 constexpr LONG kResults = 32;  // ring, indexed by g_resultCount
@@ -350,6 +351,9 @@ constexpr uintptr_t kKindTable = 0x110F730;  // image-relative; 112 rows of 0x10
 constexpr int kKinds = 112;
 constexpr uintptr_t kArcMgr = 0x14D9280, kRequestArc = 0x188C0;
 constexpr uintptr_t kRecordDti = 0x1593650, kLayoutDti = 0x1592B98;  // cSetInfoEnemy, cLayoutSetEnemy
+// +0x361970 reads the layout's cGroupParam (+0x74) without a null check (first synthetic
+// spawn, 2026-10-10: FAULT); a default one (+0x138 = 0, +0x60 = 0) makes it do nothing.
+constexpr uintptr_t kGroupDti = 0x15A8804, kLayoutGroup = 0x74;
 constexpr uintptr_t kResState = 0x50;  // bit 0 loaded, bit 6 failed
 constexpr ULONGLONG kArcTimeoutMs = 20000;
 using RequestFn = int(__stdcall*)(uint32_t mgr, uint32_t id, uint32_t* res, uint32_t prio, uint32_t flag);
@@ -363,6 +367,12 @@ struct Synth {
     ULONGLONG since;
 };
 Synth g_syn = {};
+
+uint32_t g_faultAt = 0;
+int FaultFilter(EXCEPTION_POINTERS* e) {
+    g_faultAt = reinterpret_cast<uint32_t>(e->ExceptionRecord->ExceptionAddress);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 
 uint32_t KindRow(LONG id) {
     for (int i = 0; i < kKinds; ++i) {
@@ -442,22 +452,25 @@ bool SyntheticTick(uintptr_t arisen) {
     float g[3];
     if (!SpotGlobal(arisen, g)) return finish("no spot (tile or Arisen unknown)");
     r = {};
-    uint32_t rec = 0, lay = 0;
+    uint32_t rec = 0, lay = 0, grp = 0;
     __try {
         rec = NewInstance(static_cast<uint32_t>(g_base + kRecordDti));
         lay = NewInstance(static_cast<uint32_t>(g_base + kLayoutDti));
+        grp = NewInstance(static_cast<uint32_t>(g_base + kGroupDti));
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return finish("kind: FAULT creating the record or layout");
+        return finish("kind: FAULT creating the record, layout or group");
     }
-    if (!rec || !lay) return finish("kind: newInstance returned 0");
+    if (!rec || !lay || !grp) return finish("kind: newInstance returned 0");
+    memcpy(reinterpret_cast<void*>(lay + kLayoutGroup), &grp, 4);
     Slot& s = g_slots[g_used];
     memset(s.holder, 0, sizeof(s.holder));
     memcpy(s.holder + 8, &rec, 4);
     __try {
         memcpy(reinterpret_cast<void*>(rec + kRecPos), g, sizeof(g));
         r.unit = CallCreate(row, lay, reinterpret_cast<uint32_t>(s.holder));
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (FaultFilter(GetExceptionInformation())) {
         r.fault = true;
+        r.faultAt = g_faultAt;
     }
     r.record = rec;
     if (r.unit) Read(r.unit + kPos, r.pos, sizeof(r.pos));
@@ -568,9 +581,10 @@ void Poll() {
             g_log("spawn: state watch armed on %08X in %d threads for %llu ms", static_cast<unsigned>(r.unit + 4), n,
                   kWatchMs);
         }
-        g_log("spawn: %s; unit %s %08X at (%.0f, %.0f, %.0f) from record %08X",
+        g_log("spawn: %s; unit %s %08X at (%.0f, %.0f, %.0f) from record %08X%s",
               r.fault ? "FAULT inside the game's creation" : (r.unit ? "created" : "returned 0"), cls, r.unit,
-              r.pos[0], r.pos[1], r.pos[2], r.record);
+              r.pos[0], r.pos[1], r.pos[2], r.record, "");
+        if (r.fault && r.faultAt) g_log("spawn: the fault was at +%X", r.faultAt - static_cast<uint32_t>(g_base));
     }
 }
 

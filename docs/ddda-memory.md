@@ -491,3 +491,9 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   archive ID, the archive requested by ID (`+0x188C0`, then pinned), a new cSetInfoEnemy
   record with the spot as mPosition, a new cLayoutSetEnemy, an empty holder pointing to the
   record, then `+0x3613D0`. Results in the log (`spawn: kind ...`, `created` / `not run`).
+  First run (2026-10-10 21:34, wolf `spawnkind 49`, linked): **FAULT inside the creation**
+  (caught; DDDA kept running); the wolf object was built and its record's global position
+  applied, then it was destroyed 0.5 s later. Cause read statically: `+0x361970` reads the
+  layout's cGroupParam (`+0x74`) with no null check, and a default cLayoutSetEnemy has none.
+  Fix (built, not tested): a default cGroupParam (DTI `0x19A8804`, newInstance `+0x8C2B00`,
+  0x1E8 bytes) in the layout's `+0x74`; faults now log their address.
