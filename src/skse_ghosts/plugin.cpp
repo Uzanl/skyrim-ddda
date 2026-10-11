@@ -382,7 +382,7 @@ bridge::Npcs* NpcsOut() {
 }
 
 // Living actors hostile to the player within kNpcRange, nearest first, mapped to DDDA's
-// global coordinates with the last camera command (the inverse of ReadPawns). Written
+// global coordinates relative to the Dragonborn's feet (the command's `body`). Written
 // only while the terrain link is on; otherwise the list is emptied.
 void PublishNpcs() {
     bridge::Npcs* out = NpcsOut();
@@ -412,9 +412,11 @@ void PublishNpcs() {
             npc.formId = actor->GetFormID();
             auto* race = actor->GetRace();
             if (race && race->HasKeywordString("ActorTypeNPC")) npc.flags |= bridge::kNpcHuman;
-            npc.pos[0] = cmd.pos[0] + (p.x - cmd.skyPose[0]) / bridge::kDDToSkyrim;
-            npc.pos[1] = cmd.pos[1] + (p.z - cmd.skyPose[2]) / bridge::kDDToSkyrim;
-            npc.pos[2] = cmd.pos[2] - (p.y - cmd.skyPose[1]) / bridge::kDDToSkyrim;
+            // From the Dragonborn's feet (cmd.body, DD global): the camera's DD height is
+            // adjusted in terrain mode, so mapping from it put stand-ins 2-7 m too high.
+            npc.pos[0] = cmd.body[0] + (p.x - me.x) / bridge::kDDToSkyrim;
+            npc.pos[1] = cmd.body[1] + (p.z - me.z) / bridge::kDDToSkyrim;
+            npc.pos[2] = cmd.body[2] - (p.y - me.y) / bridge::kDDToSkyrim;
             npc.heading = actor->GetAngleZ();
             found[n++] = {d, npc};
         }

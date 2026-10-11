@@ -519,3 +519,15 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   hit reaction still plays) and summed for step 2. When the NPC is gone for 1 s it gets the
   kill request (state 3). Logs: `standin made / removed / lost / not made`, and every 5 s
   `standins: N FORMID@(x,y,z) dmg D`.
+- **First test (2026-10-10 21:58, two bandits near the linked party):** both stand-ins were
+  made, but no hit was logged and DDDA crashed 2 s after one was removed (its NPC flickered
+  out of the list). Crash dump: access violation at `+0x65F1A` in a pawn's AI (function
+  `+0x65DD0`, esi/edi = pawns): it walks the pawn's known-target list (`[ecx+0x30]`, entries
+  with the unit at `+0x48`, flags `+0x4C`/`+0x4D`, `+0x50`) and read a null unit. The kill
+  request written directly (state 3) had deleted a living enemy the pawns still knew. Also
+  seen: for a moment the stand-ins were 100 m off after a tile crossing (the tile origin was
+  copied once a second), and 2-7 m too high (mapped from the camera, whose DD height is
+  adjusted in terrain mode). Fixes (built): removal by a lethal hit through ApplyDamage (the
+  vital block seen in a hit, or `[unit+0x4BC]+0x1D0` when its owner `+0x1B4` matches), 3 s
+  before removing, the live tile origin, and NPC heights mapped from the Dragonborn's feet
+  (`cmd.body`).

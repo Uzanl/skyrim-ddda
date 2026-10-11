@@ -73,7 +73,15 @@ Slot g_slots[kSlots];
 volatile LONG g_used = 0;
 
 volatile LONG g_pending = 0;  // spawns requested, not run yet
-volatile LONG g_session = 0, g_originValid = 0, g_tileN = 0, g_tileM = 0;
+volatile LONG g_session = 0;
+// The bridge's live tile origin (dllmain.cpp g_orgN/g_orgM/g_orgValid): a copy refreshed once a
+// second put the stand-ins 100 m off for a moment after the Arisen crossed a tile (2026-10-10).
+const volatile LONG* g_orgNp = nullptr;
+const volatile LONG* g_orgMp = nullptr;
+const volatile LONG* g_orgValidp = nullptr;
+#define g_tileN (*g_orgNp)
+#define g_tileM (*g_orgMp)
+#define g_originValid (g_orgValidp && *g_orgValidp)
 int g_lastN = -1;
 
 // Results for the log (written by the Arisen's thread).
@@ -526,10 +534,14 @@ bool SyntheticTick(uintptr_t arisen) {
 // its move()s it is put back at the NPC's spot (x/z, height on the first placement), so the
 // pawns fight it where the NPC is in Skyrim. It takes no damage (ApplyDamage is zeroed for
 // it, the hit reaction still plays); the damage is summed for the NPC (step 2, not done).
-// When the NPC is gone for 1 s, the stand-in gets the kill request (state 3 in +4, as the
-// game writes it).
+// When the NPC is gone for 3 s, the stand-in is killed with a lethal hit through
+// ApplyDamage, so it dies the normal way. (2026-10-10: the kill request written directly,
+// state 3 in +4, deleted a living enemy the pawns still had in their target lists, and a
+// pawn's AI crashed on it at +0x65F1A two seconds later.)
 constexpr LONG kHumanKind = 0x6E5, kCreatureKind = 0x49;
-constexpr ULONGLONG kNpcGoneMs = 1000;
+// The NPC flickered in and out of the published list (2026-10-10): 3 s before removing.
+constexpr ULONGLONG kNpcGoneMs = 3000;
+constexpr uintptr_t kStatusPtr = 0x4BC, kStatusToVital = 0x1D0, kVitalOwnerOff = 0x1B4, kVitalMax = 0xC;
 constexpr int kMaxStandins = static_cast<int>(bridge::kMaxNpcs);
 constexpr uintptr_t kAdjCopies[3] = {0x120, 0x130, 0x140}, kAdjVelocity = 0x150;
 constexpr uintptr_t kScrAdjustVt = 0x119704C;  // cScrAdjust, image-relative
@@ -542,6 +554,8 @@ struct Standin {
     ULONGLONG lastSeen;
     volatile LONG damage;    // summed damage taken, x10 (fixed point)
     LONG kind;
+    volatile uint32_t vital; // its vital block, seen in ApplyDamage
+    volatile LONG removing;  // the lethal hit must not be zeroed
 };
 Standin g_si[kMaxStandins] = {};
 volatile LONG g_standinsOn = 0;
@@ -661,14 +675,40 @@ bool ReadNpcs(bridge::Npcs* out) {
     return false;
 }
 
+// The stand-in's vital block: seen in a hit, or the party's layout ([unit+0x4BC] + 0x1D0)
+// when its owner field points back at the unit.
+uint32_t VitalOf(const Standin& s) {
+    if (s.vital) return s.vital;
+    uint32_t st = U32(s.unit + kStatusPtr);
+    if (!st) return 0;
+    uint32_t v = st + kStatusToVital;
+    return U32(v + kVitalOwnerOff) == s.unit ? v : 0;
+}
+
 void RemoveStandin(Standin& s, const char* why) {
-    if (s.unit && U32(s.unit) == s.vt) KillUnit(s.unit);
+    if (s.unit && U32(s.unit) == s.vt) {
+        uint32_t vital = VitalOf(s);
+        if (!vital) {
+            Event("kept", s, "no vital block to kill it with (left alive)");
+            s.lastSeen = GetTickCount64();  // try again later
+            return;
+        }
+        float max = 0;
+        Read(vital + kVitalMax, &max, 4);
+        InterlockedExchange(&s.removing, 1);
+        __try {
+            damagelog::Apply(vital, (max > 0 && max < 1.0e6f ? max : 10000.0f) * 10.0f);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Event("removed", s, "FAULT in the lethal hit");
+        }
+    }
     Event("removed", s, why);
     s.unit = 0;
 }
 
 // Arisen's thread, every frame while "standins" is on in a session.
 void StandinTick() {
+    if (!g_orgNp || !g_orgMp) return;
     ULONGLONG now = GetTickCount64();
     bridge::Npcs npcs;
     if (!ReadNpcs(&npcs)) npcs.count = 0;
@@ -745,9 +785,10 @@ void StandinTick() {
 }
 
 // damage_log's filter (game threads, inside ApplyDamage): a stand-in's damage is zeroed.
-bool StandinDamage(uint32_t owner, float damage) {
+bool StandinDamage(uint32_t owner, uint32_t vital, float damage) {
     Standin* s = StandinOf(owner);
-    if (!s || !g_standinsOn) return false;
+    if (!s || !g_standinsOn || s->removing) return false;
+    s->vital = vital;
     InterlockedExchangeAdd(&s->damage, static_cast<LONG>(damage * 10.0f));
     return true;
 }
@@ -792,11 +833,17 @@ void Install(LogFn log, uintptr_t base) {
     AddVectoredExceptionHandler(1, &WatchHandler);
 }
 
+void SetTileOrigin(const volatile LONG* n, const volatile LONG* m, const volatile LONG* valid) {
+    g_orgNp = n;
+    g_orgMp = m;
+    g_orgValidp = valid;
+}
+
 void SetRequest(int n, bool session, bool originValid, int tileN, int tileM) {
     InterlockedExchange(&g_session, session ? 1 : 0);
-    InterlockedExchange(&g_originValid, originValid ? 1 : 0);
-    InterlockedExchange(&g_tileN, tileN);
-    InterlockedExchange(&g_tileM, tileM);
+    (void)originValid;
+    (void)tileN;
+    (void)tileM;
     if (n != g_lastN) {
         if (g_lastN >= 0 && n >= 0 && session) {
             InterlockedIncrement(&g_pending);

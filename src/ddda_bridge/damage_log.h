@@ -15,8 +15,10 @@ void Install(LogFn log, uintptr_t base);
 void NoteParty(int role, uint32_t obj);
 // Called inside ApplyDamage for each hit (game threads) with the victim and the damage;
 // returning true zeroes that hit's damage (stand-ins, spawn.cpp). The hit is still logged.
-using Filter = bool (*)(uint32_t owner, float damage);
+using Filter = bool (*)(uint32_t owner, uint32_t vital, float damage);
 void SetFilter(Filter f);
+// Calls ApplyDamage (eax = vital, damage, 0) like the game's hit code does.
+void Apply(uint32_t vital, float damage);
 // Bridge thread: writes the hits recorded since the last call to the log.
 void Poll();
 

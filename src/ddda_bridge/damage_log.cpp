@@ -76,7 +76,7 @@ void __stdcall Record(const uint32_t* frame) {
     h.arg2 = frame[10];
     if (Filter f = g_filter) {
         uint32_t owner = 0;
-        if (CopyRec(h.vital + kVitalOwner, &owner, 4) && owner && f(owner, h.damage)) {
+        if (CopyRec(h.vital + kVitalOwner, &owner, 4) && owner && f(owner, h.vital, h.damage)) {
             const float zero = 0.0f;
             memcpy(const_cast<uint32_t*>(&frame[9]), &zero, 4);  // the damage argument on the stack
         }
@@ -198,6 +198,16 @@ void Install(LogFn log, uintptr_t base) {
 
 void SetFilter(Filter f) {
     g_filter = f;
+}
+
+void Apply(uint32_t vital, float damage) {
+    uint32_t fn = static_cast<uint32_t>(g_base + kApplyDamage);  // through our hook, so it is logged
+    __asm {
+        push 0
+        push damage
+        mov eax, vital
+        call fn
+    }
 }
 
 void Poll() {

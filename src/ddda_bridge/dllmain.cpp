@@ -2022,6 +2022,7 @@ DWORD WINAPI BridgeThread(LPVOID) {
     hijack::Init(&Log, g_base);
     spawnlog::Install(&Log, g_base);
     spawn::Install(&Log, g_base);
+    spawn::SetTileOrigin(&g_orgN, &g_orgM, &g_orgValid);
     OpenCameraMapping();
     OpenNamesMapping();
     OpenGroundMapping();

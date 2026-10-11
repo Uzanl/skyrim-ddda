@@ -6,6 +6,8 @@
 // archives are kept loaded (one extra reference), so a spawn after the link has them.
 #pragma once
 
+#include <windows.h>
+
 #include <cstdint>
 
 namespace spawn {
@@ -16,6 +18,8 @@ void Install(LogFn log, uintptr_t base);
 // Bridge thread: ddda_experiment.txt's "spawn N" (-1 = no such line), the session flag,
 // and the tile origin (global = local + ((n - 50), 0, (m - 50)) * 10000).
 void SetRequest(int n, bool session, bool originValid, int tileN, int tileM);
+// The bridge's live tile origin (read on game threads every frame).
+void SetTileOrigin(const volatile LONG* n, const volatile LONG* m, const volatile LONG* valid);
 // ddda_experiment.txt's "spawnkind ID" (archive ID, hex; 0 = off): spawns are then made
 // from nothing (kind table row, archive requested by ID, new record and layout).
 void SetKind(int archiveId);
