@@ -166,6 +166,21 @@ bool Sane(const float* p) {
     return true;
 }
 
+// The spot 4 m in front of the Arisen (camera -> Arisen, horizontally), global coordinates.
+bool SpotGlobal(uintptr_t arisen, float* g) {
+    float a[3], cam[3];
+    if (!g_originValid || !Read(arisen + kPos, a, sizeof(a)) || !Sane(a)) return false;
+    float fx = 0, fz = 1;
+    if (Read(U32(g_base + kCamRoot) + kCamOff, cam, sizeof(cam)) && Sane(cam)) {
+        float dx = a[0] - cam[0], dz = a[2] - cam[2], l = std::hypot(dx, dz);
+        if (l > 1.0f) fx = dx / l, fz = dz / l;
+    }
+    g[0] = a[0] + fx * kAhead + (static_cast<float>(g_tileN) - 50.0f) * kTile;
+    g[1] = a[1] + 50.0f;
+    g[2] = a[2] + fz * kAhead + (static_cast<float>(g_tileM) - 50.0f) * kTile;
+    return true;
+}
+
 void RunSpawn(uintptr_t arisen) {
     Capture c;
     AcquireSRWLockShared(&g_lock);
@@ -176,27 +191,17 @@ void RunSpawn(uintptr_t arisen) {
     if (idx >= kSlots) return;  // all slots used: nothing more is spawned
     Result& r = g_results[g_resultCount % kResults];  // only the Arisen's thread writes
     r = {};
-    float a[3], cam[3];
-    r.why = !have ? "no real enemy creation seen yet"
-            : !g_originValid ? "tile origin unknown"
-            : (!Read(arisen + kPos, a, sizeof(a)) || !Sane(a)) ? "Arisen position unreadable"
-            : nullptr;
+    float g[3];
+    r.why = !have ? "no real enemy creation seen yet" : !SpotGlobal(arisen, g) ? "no spot (tile or Arisen unknown)" : nullptr;
     if (r.why) {
         InterlockedIncrement(&g_resultCount);
         return;
-    }
-    float fx = 0, fz = 1;
-    if (Read(U32(g_base + kCamRoot) + kCamOff, cam, sizeof(cam)) && Sane(cam)) {
-        float dx = a[0] - cam[0], dz = a[2] - cam[2], l = std::hypot(dx, dz);
-        if (l > 1.0f) fx = dx / l, fz = dz / l;
     }
     Slot& s = g_slots[idx];
     memcpy(s.holder, c.holderCopy, kHolderBytes);
     memcpy(s.record, c.recordCopy, kRecBytes);
     uint32_t rec = reinterpret_cast<uint32_t>(s.record);
     memcpy(s.holder + 8, &rec, 4);
-    float g[3] = {a[0] + fx * kAhead + (static_cast<float>(g_tileN) - 50.0f) * kTile, a[1] + 50.0f,
-                  a[2] + fz * kAhead + (static_cast<float>(g_tileM) - 50.0f) * kTile};
     memcpy(s.record + kRecPos, g, sizeof(g));
     r.record = c.record;
     r.unit = 0;
@@ -336,7 +341,139 @@ void PinEnemyArchives() {
     }
 }
 
+// --- synthetic spawn ("spawnkind ID", docs/ddda-memory.md "Loading any enemy") ---
+// Nothing copied from a real creation: the kind row comes from the static table, the
+// archive is requested by ID (and pinned), the record (cSetInfoEnemy) and the layout
+// (cLayoutSetEnemy) are new default instances (MtDTI vtable slot 1 = newInstance, no
+// arguments), and the record gets the spot as its mPosition.
+constexpr uintptr_t kKindTable = 0x110F730;  // image-relative; 112 rows of 0x10
+constexpr int kKinds = 112;
+constexpr uintptr_t kArcMgr = 0x14D9280, kRequestArc = 0x188C0;
+constexpr uintptr_t kRecordDti = 0x1593650, kLayoutDti = 0x1592B98;  // cSetInfoEnemy, cLayoutSetEnemy
+constexpr uintptr_t kResState = 0x50;  // bit 0 loaded, bit 6 failed
+constexpr ULONGLONG kArcTimeoutMs = 20000;
+using RequestFn = int(__stdcall*)(uint32_t mgr, uint32_t id, uint32_t* res, uint32_t prio, uint32_t flag);
+
+volatile LONG g_kind = 0;
+struct Synth {
+    LONG kind;
+    uint32_t res;
+    int handle;
+    bool pinned;
+    ULONGLONG since;
+};
+Synth g_syn = {};
+
+uint32_t KindRow(LONG id) {
+    for (int i = 0; i < kKinds; ++i) {
+        uint32_t row = static_cast<uint32_t>(g_base + kKindTable + i * 0x10);
+        if (U32(row + 8) == static_cast<uint32_t>(id)) return row;
+    }
+    return 0;
+}
+
+uint32_t NewInstance(uint32_t dti) {
+    uint32_t fn = U32(U32(dti) + 4), obj = 0;
+    if (fn < g_base + 0x1000 || fn >= g_base + 0x1000000) return 0;
+    __asm {
+        mov ecx, dti
+        call fn
+        mov obj, eax
+    }
+    return obj;
+}
+
+// Arisen's thread. Returns true when this request is finished (created or given up).
+bool SyntheticTick(uintptr_t arisen) {
+    ULONGLONG now = GetTickCount64();
+    LONG kind = g_kind;
+    if (g_syn.kind != kind) {
+        g_syn = {};
+        g_syn.kind = kind;
+        g_syn.handle = -1;
+        g_syn.since = now;
+    }
+    if (g_used >= kSlots) return true;
+    Result& r = g_results[g_resultCount % kResults];
+    auto finish = [&](const char* why) {
+        r = {};
+        r.why = why;
+        InterlockedIncrement(&g_resultCount);
+        return true;
+    };
+    uint32_t row = KindRow(kind);
+    if (!row) return finish("kind: no row with that archive ID in the kind table");
+    if (!g_syn.res && g_syn.handle < 0) {
+        int handle = -1;
+        uint32_t* slot = &g_syn.res;
+        uint32_t mgr = U32(g_base + kArcMgr);
+        auto request = reinterpret_cast<RequestFn>(g_base + kRequestArc);
+        __try {
+            handle = request(mgr, static_cast<uint32_t>(kind), slot, 2, 1);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            g_syn.kind = 0;
+            return finish("kind: FAULT requesting the archive");
+        }
+        g_syn.handle = handle;
+        if (handle < 0 && !g_syn.res) {
+            g_syn.kind = 0;
+            return finish("kind: the archive request returned nothing");
+        }
+    }
+    uint32_t st = g_syn.res ? U32(g_syn.res + kResState) : 0;
+    if (st & 0x40) {
+        g_syn.kind = 0;  // retry from scratch next time
+        return finish("kind: the archive failed to load");
+    }
+    if (!(st & 1)) return now - g_syn.since > kArcTimeoutMs ? finish("kind: archive not loaded after 20 s") : false;
+    if (!g_syn.pinned) {
+        uint32_t mgr = U32(g_base + kResourceMgr);
+        auto* lock = reinterpret_cast<CRITICAL_SECTION*>(mgr + kResLock);
+        auto* ref = reinterpret_cast<volatile LONG*>(g_syn.res + kResRef);
+        __try {
+            EnterCriticalSection(lock);
+            ++*ref;
+            LeaveCriticalSection(lock);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return finish("kind: FAULT pinning the archive");
+        }
+        g_syn.pinned = true;
+    }
+    float g[3];
+    if (!SpotGlobal(arisen, g)) return finish("no spot (tile or Arisen unknown)");
+    r = {};
+    uint32_t rec = 0, lay = 0;
+    __try {
+        rec = NewInstance(static_cast<uint32_t>(g_base + kRecordDti));
+        lay = NewInstance(static_cast<uint32_t>(g_base + kLayoutDti));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return finish("kind: FAULT creating the record or layout");
+    }
+    if (!rec || !lay) return finish("kind: newInstance returned 0");
+    Slot& s = g_slots[g_used];
+    memset(s.holder, 0, sizeof(s.holder));
+    memcpy(s.holder + 8, &rec, 4);
+    __try {
+        memcpy(reinterpret_cast<void*>(rec + kRecPos), g, sizeof(g));
+        r.unit = CallCreate(row, lay, reinterpret_cast<uint32_t>(s.holder));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        r.fault = true;
+    }
+    r.record = rec;
+    if (r.unit) Read(r.unit + kPos, r.pos, sizeof(r.pos));
+    InterlockedIncrement(&g_used);
+    InterlockedIncrement(&g_resultCount);
+    return true;
+}
+
 }  // namespace
+
+void SetKind(int archiveId) {
+    if (archiveId == g_kind) return;
+    InterlockedExchange(&g_kind, archiveId);
+    if (archiveId) g_log("spawn: kind = archive %X (synthetic spawns, nothing copied)", archiveId);
+    else g_log("spawn: kind off (spawns copy the last real creation)");
+}
 
 void Install(LogFn log, uintptr_t base) {
     g_log = log;
@@ -385,6 +522,10 @@ void SetRequest(int n, bool session, bool originValid, int tileN, int tileM) {
 
 void ArisenTick(uintptr_t arisen) {
     if (!g_session || !g_pending) return;
+    if (g_kind) {
+        if (SyntheticTick(arisen)) InterlockedDecrement(&g_pending);
+        return;
+    }
     InterlockedDecrement(&g_pending);
     RunSpawn(arisen);
 }

@@ -480,3 +480,14 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   (static), a placement record of its record class (cSetInfoEnemyNNNN), and a layout object
   (`cLayoutSetEnemy`, live per area; its `+0x48`, `+0x4C` and `+0x74` cGroupParam are read).
   The last two are still copied from a real creation.
+- **MtDTI live layout** (read 2026-10-10): `+0` vtable, `+4` name, `+0x10` parent, `+0x18` size
+  and flags (cSetInfoEnemy `0x5000110`: size 0x110), `+0x1C` hash. DTI vtable slot 1 is
+  **newInstance** (no arguments; allocates and constructs with the defaults): cSetInfoEnemy
+  `+0x39F630` (0x110 bytes), cLayoutSetEnemy `+0x360210` (0x98 bytes), uEm0200 `+0x4EFD20`
+  (the function seen on the spawn chains). DTIs are built at start-up, so they are empty on
+  disk. cSetInfoEnemy0200's DTI is `0x1996040`.
+- **Synthetic spawn (built 2026-10-10, not tested):** `spawnkind ID` (archive ID, hex) in
+  `ddda_experiment.txt` makes `spawn N` build everything itself: the kind row with that
+  archive ID, the archive requested by ID (`+0x188C0`, then pinned), a new cSetInfoEnemy
+  record with the spot as mPosition, a new cLayoutSetEnemy, an empty holder pointing to the
+  record, then `+0x3613D0`. Results in the log (`spawn: kind ...`, `created` / `not run`).

@@ -1255,6 +1255,7 @@ void PollExperiment(const wchar_t* folder) {
     bool learnPaused = false;  // "nolearn": see isolate::SetLearnPaused
     bool hijackLine = false;   // "hijack": see hijack.h (bridge session only)
     int spawnN = -1;           // "spawn N": see spawn.h (bridge session only)
+    unsigned spawnKind = 0;    // "spawnkind ID": see spawn.h
     if (_wfopen_s(&f, path, L"r") == 0 && f) {
         if (!fgets(line, sizeof(line), f)) line[0] = 0;
         char more[64];
@@ -1269,6 +1270,7 @@ void PollExperiment(const wchar_t* folder) {
             if (strncmp(l, "nolearn", 7) == 0) learnPaused = true;
             if (strncmp(l, "hijack", 6) == 0) hijackLine = true;
             sscanf_s(l, "spawn %d", &spawnN);
+            sscanf_s(l, "spawnkind %x", &spawnKind);
         };
         parse(line);
         while (fgets(more, sizeof(more), f)) parse(more);
@@ -1277,6 +1279,7 @@ void PollExperiment(const wchar_t* folder) {
     relight::SetOptions(lightOn, fogOn, lightScale, lightMask);
     isolate::SetLearnPaused(learnPaused);
     hijack::SetEnabled(hijackLine && g_session);
+    spawn::SetKind(static_cast<int>(spawnKind));
     spawn::SetRequest(spawnN, g_session, g_orgValid != 0, g_orgN, g_orgM);
     static int lastPoseDelay = INT_MIN;  // not kPoseLatch (-1): that is a valid setting
     if (poseDelay != lastPoseDelay) {

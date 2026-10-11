@@ -16,6 +16,9 @@ void Install(LogFn log, uintptr_t base);
 // Bridge thread: ddda_experiment.txt's "spawn N" (-1 = no such line), the session flag,
 // and the tile origin (global = local + ((n - 50), 0, (m - 50)) * 10000).
 void SetRequest(int n, bool session, bool originValid, int tileN, int tileM);
+// ddda_experiment.txt's "spawnkind ID" (archive ID, hex; 0 = off): spawns are then made
+// from nothing (kind table row, archive requested by ID, new record and layout).
+void SetKind(int archiveId);
 // Arisen's move() hook, after the original: runs a pending spawn.
 void ArisenTick(uintptr_t arisen);
 // Bridge thread: logs captures and spawn results.
