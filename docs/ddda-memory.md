@@ -458,3 +458,25 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     the wolf. Not known: whether the wolf's archive must be loaded (`cEmArcLoad`; a wolf
     area has it loaded), and whether a second enemy from the same placement confuses the
     lot manager.
+
+## Loading any enemy (static, 2026-10-10)
+
+- **Archive ID table:** `0x153E568` and on (pairs `{u32 id, const char* path}`, 3845 in two
+  runs): every loadable archive with an ID, e.g. `0x47` = `rom\enemy\em0100`, **`0x49` =
+  `rom\enemy\em0200`** (wolf), `0x52` em0400, `0x5B` em0500, `0x63` em0600, `0x6B` em2000,
+  `0x78` em5000, `0xAE` em0700; `0x6E5` = `rom\h_enemy\he00_00`, `0x6EF` he01_00, `0x6F7`
+  he02_00, ... `0x72F` he09_03 (75 human enemy archives); also npc, npcfca, om, wp, mnpc.
+- **Enemy kind table:** `0x150F730`, 112 rows of 0x10 `{vtable, DTI of the unit class, archive
+  ID, kind number}`. The object `+0x3613D0` gets in `eax` is one of these rows: the wolf's
+  is `0x150F760` = `{0x1593DE0, uEm0200 DTI 0x1997E40, 0x49, 8}`. Twelve rows are
+  **`uHumanEnemy`** (DTI `0x19A3DB4`) with archives `0x6E5, 0x6EF, 0x6F7, 0x713, 0x717, 0x71B,
+  0x71E, 0x723, 0x728, 0x72C, 0x6EB, 0x6ED` (kinds 0x2D..0x36, 0xA7, 0xA8).
+- **Requesting an archive by ID:** `+0x188C0`, stdcall `(mgr = [0x18D9280], id, &resource,
+  priority, flag)`, `ret 0x14`, returns a handle (-1 = none); per-ID info at
+  `[0x18D9288 + id*4]`. The loader (`+0x18F70`, edi = loader) calls it as `(mgr, id, &slot,
+  2, 1)` and treats the archive as ready when `[resource+0x50] & 1`, failed when bit 6
+  (0x40) is set. Releasing: `+0x9E0B90(resource)` and `+0x18CF0(mgr, id, handle)`.
+- So a stand-in of any kind needs: its archive (request by ID, then pin), its kind row
+  (static), a placement record of its record class (cSetInfoEnemyNNNN), and a layout object
+  (`cLayoutSetEnemy`, live per area; its `+0x48`, `+0x4C` and `+0x74` cGroupParam are read).
+  The last two are still copied from a real creation.
