@@ -433,10 +433,20 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   - **Linked spawn with the archive pinned (21:12):** created 4 m from the Arisen on the
     generated ground, no fatal error, but **destroyed 0.5 s later** (same sUnit path). Without
     its archive (20:54) it had never initialised, so nothing had killed it.
-  - **State watch (built, not tested):** right after a spawn the bridge thread sets a
-    hardware write watchpoint (DR0, 4 bytes) on the unit's `+4` in every other thread for 3 s;
-    a vectored handler records each write (the instruction after it, the new state, callers on
-    the stack). Log `spawn: state watch` and `write N: after +X, state now ...`.
+  - **State watch:** right after a spawn the bridge thread sets a hardware write watchpoint
+    (DR0, 4 bytes) on the unit's `+4` in every other thread for 3 s; a vectored handler
+    records each write (the instruction after it, the new state, callers on the stack). Log
+    `spawn: state watch` and `write N: ...`. Ran once (21:19, 70 threads armed and cleared,
+    DDDA fine): 0 writes, because that wolf was not killed.
+  - **A spawned wolf fought the party on Skyrim's ground (verified in game 2026-10-10
+    21:19, linked to Skyrim, archive pinned):** created 4 m from the Arisen at local (4225,
+    92965, 5140); a pawn's arrow hit it 2 s later (329), **it hit the main pawn four times**
+    (attacker `uEm0200` at `rec+0x50`; 57, 0, 14, 14 damage), two more arrows killed it at
+    21:19:33 (HP 0/800), and its corpse was removed at 21:19:37. The user saw the pawn
+    fighting in Skyrim (the wolf itself is not drawn there: isolate keeps only the party).
+    **Open:** why the 21:12 spawn (same setup, spot (4698, 5134)) was destroyed 0.5 s after
+    creation while this one lived; maybe its spot had no ground. The state watch is ready to
+    catch it if it happens again.
   - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
