@@ -13,9 +13,16 @@
 //
 // Its first 9 bytes are whole instructions (push ebp; mov ebp, esp; and esp, -16;
 // sub esp, 0x34), so they become a jmp to Stub, which records the call and runs them.
+//
+// State watch: a spawned wolf with its archive loaded was destroyed 0.5 s after creation on
+// the generated ground (2026-10-10). The kill request (state 3 in the unit's +4, written
+// inline in ~80 places) is found with a hardware write watchpoint: right after a spawn the
+// bridge thread sets DR0 on the unit's +4 in every other thread for kWatchMs; a vectored
+// handler records each write (instruction after it, new value, the stack) and continues.
 #include "spawn.h"
 
 #include <windows.h>
+#include <tlhelp32.h>
 
 #include <cmath>
 #include <cstdio>
@@ -204,6 +211,99 @@ void RunSpawn(uintptr_t arisen) {
     InterlockedIncrement(&g_resultCount);
 }
 
+// --- state watch ---
+constexpr ULONGLONG kWatchMs = 3000;
+constexpr int kMaxHits = 16;
+constexpr size_t kHitStack = 64;
+struct WatchHit {
+    uint32_t eip, value, tid;
+    uint32_t stack[kHitStack];
+};
+WatchHit g_hits[kMaxHits];
+volatile LONG g_hitCount = 0;
+volatile uintptr_t g_watchAddr = 0;
+ULONGLONG g_watchSince = 0;
+
+LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* e) {
+    if (e->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;
+    CONTEXT* c = e->ContextRecord;
+    if (!(c->Dr6 & 1) || !g_watchAddr) return EXCEPTION_CONTINUE_SEARCH;
+    c->Dr6 &= ~0xFu;
+    LONG n = InterlockedIncrement(&g_hitCount);
+    if (n <= kMaxHits) {
+        WatchHit& h = g_hits[n - 1];
+        h.eip = c->Eip;
+        h.tid = GetCurrentThreadId();
+        h.value = 0;
+        Read(g_watchAddr, &h.value, 4);
+        memset(h.stack, 0, sizeof(h.stack));
+        Read(c->Esp, h.stack, sizeof(h.stack));
+    }
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+// DR0 = addr, 4-byte write watch (on) or cleared (off), in every thread but the caller's.
+int ArmAll(uintptr_t addr, bool on) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    DWORD pid = GetCurrentProcessId(), self = GetCurrentThreadId();
+    THREADENTRY32 te = {sizeof(te)};
+    int armed = 0;
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+        HANDLE t = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, te.th32ThreadID);
+        if (!t) continue;
+        if (SuspendThread(t) != static_cast<DWORD>(-1)) {
+            CONTEXT ctx = {};
+            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            if (GetThreadContext(t, &ctx)) {
+                ctx.Dr7 &= ~0x000F0003u;
+                if (on) {
+                    ctx.Dr0 = addr;
+                    ctx.Dr7 |= 1u | (1u << 16) | (3u << 18);  // L0, write, 4 bytes
+                } else {
+                    ctx.Dr0 = 0;
+                }
+                if (SetThreadContext(t, &ctx)) ++armed;
+            }
+            ResumeThread(t);
+        }
+        CloseHandle(t);
+    }
+    CloseHandle(snap);
+    return armed;
+}
+
+bool AfterCall(uint32_t v) {
+    if (v < g_base + 0x1000 || v >= g_base + 0x1000000) return false;
+    uint8_t b[7];
+    if (!Read(v - 7, b, 7)) return false;
+    return b[2] == 0xE8 || (b[5] == 0xFF && (b[6] & 0x38) == 0x10) || (b[4] == 0xFF && (b[5] & 0x38) == 0x10) ||
+           (b[1] == 0xFF && (b[2] & 0x38) == 0x10);
+}
+
+void PollWatch(ULONGLONG now) {
+    if (!g_watchAddr || now - g_watchSince < kWatchMs) return;
+    int n = ArmAll(0, false);
+    uintptr_t addr = g_watchAddr;
+    g_watchAddr = 0;
+    LONG hits = g_hitCount;
+    g_log("spawn: state watch on %08X done (%d threads cleared): %ld writes", static_cast<unsigned>(addr), n, hits);
+    for (LONG i = 0; i < hits && i < kMaxHits; ++i) {
+        const WatchHit& h = g_hits[i];
+        char line[700];
+        size_t len = 0;
+        line[0] = 0;
+        for (size_t k = 0; k < kHitStack && len < sizeof(line) - 16; ++k)
+            if (AfterCall(h.stack[k])) {
+                int w = sprintf_s(line + len, sizeof(line) - len, " +%X", h.stack[k] - static_cast<uint32_t>(g_base));
+                if (w > 0) len += w;
+            }
+        g_log("  write %ld: after +%X, state now %08X (low bits %u), thread %u; callers:%s", i + 1,
+              h.eip - static_cast<uint32_t>(g_base), h.value, h.value & 7, h.tid, line);
+    }
+}
+
 uint32_t g_pinned[kMaxPins];
 int g_pinCount = 0;
 
@@ -266,6 +366,7 @@ void Install(LogFn log, uintptr_t base) {
     FlushInstructionCache(GetCurrentProcess(), p, 9);
     g_log(seen == from ? "spawn: enemy creation watched (log-only until a spawn line)"
                        : "spawn: code changed while patching; not hooked");
+    AddVectoredExceptionHandler(1, &WatchHandler);
 }
 
 void SetRequest(int n, bool session, bool originValid, int tileN, int tileM) {
@@ -295,6 +396,7 @@ void Poll() {
         lastPin = now;
         PinEnemyArchives();
     }
+    PollWatch(now);
     LONG caps = g_captures;
     if (caps != g_capturesLogged) {
         Capture c;
@@ -316,6 +418,14 @@ void Poll() {
         if (r.why) {
             g_log("spawn: not run (%s)", r.why);
             continue;
+        }
+        if (r.unit && !g_watchAddr) {
+            g_hitCount = 0;
+            g_watchAddr = r.unit + 4;
+            g_watchSince = now;
+            int n = ArmAll(r.unit + 4, true);
+            g_log("spawn: state watch armed on %08X in %d threads for %llu ms", static_cast<unsigned>(r.unit + 4), n,
+                  kWatchMs);
         }
         g_log("spawn: %s; unit %s %08X at (%.0f, %.0f, %.0f) from record %08X",
               r.fault ? "FAULT inside the game's creation" : (r.unit ? "created" : "returned 0"), cls, r.unit,

@@ -426,9 +426,17 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     with the path **`rom\enemy\em0200`** (6.1 MB, 9 references with 10 wolves); also loaded:
     `rom\enemy\em0100` (29 MB) and the pawns' chat `rom\pwnmsg\em\emNNNN_*`. The wolves do
     not point to their archive directly.
-  - **Pinning (built 2026-10-10, not tested):** in a session, `spawn.cpp` scans that table
-    every 2 s and gives each `rom\enemy\em*` archive one extra reference, under sResource's
-    lock (up to 12; logged `spawn: pinned enemy archive`).
+  - **Pinning (verified in game 2026-10-10 21:10):** in a session, `spawn.cpp` scans that
+    table every 2 s and gives each `rom\enemy\em*` archive one extra reference, under
+    sResource's lock (up to 12). Log: `pinned enemy archive rom\enemy\em0200 ... references
+    now 12` and `em0100 ... 2`.
+  - **Linked spawn with the archive pinned (21:12):** created 4 m from the Arisen on the
+    generated ground, no fatal error, but **destroyed 0.5 s later** (same sUnit path). Without
+    its archive (20:54) it had never initialised, so nothing had killed it.
+  - **State watch (built, not tested):** right after a spawn the bridge thread sets a
+    hardware write watchpoint (DR0, 4 bytes) on the unit's `+4` in every other thread for 3 s;
+    a vectored handler records each write (the instruction after it, the new state, callers on
+    the stack). Log `spawn: state watch` and `write N: after +X, state now ...`.
   - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
