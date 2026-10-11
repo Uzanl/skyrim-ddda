@@ -26,6 +26,7 @@ constexpr uintptr_t kVitalHp = 8, kVitalOwner = 0x1B4;
 constexpr uintptr_t kPos = 0x40;  // character position, as in dllmain.cpp
 
 LogFn g_log = nullptr;
+volatile Filter g_filter = nullptr;
 uintptr_t g_base = 0;
 uintptr_t g_resume = 0;  // ApplyDamage + 8
 
@@ -73,6 +74,13 @@ void __stdcall Record(const uint32_t* frame) {
     h.caller = frame[8];
     memcpy(&h.damage, &frame[9], 4);
     h.arg2 = frame[10];
+    if (Filter f = g_filter) {
+        uint32_t owner = 0;
+        if (CopyRec(h.vital + kVitalOwner, &owner, 4) && owner && f(owner, h.damage)) {
+            const float zero = 0.0f;
+            memcpy(const_cast<uint32_t*>(&frame[9]), &zero, 4);  // the damage argument on the stack
+        }
+    }
     h.hasRec = h.hasSrc = false;
     for (uintptr_t c : kHitCallers)
         if (h.caller == g_base + c) h.hasRec = CopyRec(frame[kEbp], h.rec, kRecBytes);
@@ -186,6 +194,10 @@ void Install(LogFn log, uintptr_t base) {
     FlushInstructionCache(GetCurrentProcess(), const_cast<LONG64*>(code), 8);
     g_log(seen == from ? "damage log: ApplyDamage hooked (log-only)"
                        : "damage log: code changed while patching; not hooked");
+}
+
+void SetFilter(Filter f) {
+    g_filter = f;
 }
 
 void Poll() {

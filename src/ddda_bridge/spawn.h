@@ -19,6 +19,9 @@ void SetRequest(int n, bool session, bool originValid, int tileN, int tileM);
 // ddda_experiment.txt's "spawnkind ID" (archive ID, hex; 0 = off): spawns are then made
 // from nothing (kind table row, archive requested by ID, new record and layout).
 void SetKind(int archiveId);
+// ddda_experiment.txt's "standins" (bridge session only): one DDDA enemy at each hostile
+// Skyrim NPC that DDDAGhosts publishes (bridge::Npcs), kept at the NPC's spot.
+void SetStandins(bool on);
 // Arisen's move() hook, after the original: runs a pending spawn.
 void ArisenTick(uintptr_t arisen);
 // Bridge thread: logs captures and spawn results.

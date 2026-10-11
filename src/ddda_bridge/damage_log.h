@@ -13,6 +13,10 @@ void Install(LogFn log, uintptr_t base);
 // move() hooks: the party's objects (role 0 Arisen, 1 main pawn, 2-3 hired), so shooter
 // candidates are recognised even for party members not yet seen in a hit.
 void NoteParty(int role, uint32_t obj);
+// Called inside ApplyDamage for each hit (game threads) with the victim and the damage;
+// returning true zeroes that hit's damage (stand-ins, spawn.cpp). The hit is still logged.
+using Filter = bool (*)(uint32_t owner, float damage);
+void SetFilter(Filter f);
 // Bridge thread: writes the hits recorded since the last call to the log.
 void Poll();
 

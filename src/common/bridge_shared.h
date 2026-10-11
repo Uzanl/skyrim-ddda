@@ -220,6 +220,41 @@ struct Names {
 
 static_assert(sizeof(Names) == 16 + 4 * 64);
 
+// --- Hostile Skyrim NPCs (DDDAGhosts -> DDDA bridge, docs/ddda-memory.md "Stand-ins") ----
+// The hostile actors near the player, in DDDA's GLOBAL open-world coordinates (mapped with
+// the last camera command, as the labels are). The DDDA bridge keeps one DDDA enemy (a
+// stand-in) at each, so the pawns fight them. Written only while the terrain link is on.
+inline constexpr wchar_t kNpcsMappingName[] = L"Local\\DDDA_SkyrimBridge_npcs_v1";
+inline constexpr uint32_t kNpcsMagic = 0x4E504444;  // "DDPN"
+inline constexpr uint32_t kNpcsVersion = 1;
+inline constexpr uint32_t kMaxNpcs = 8;
+inline constexpr uint32_t kNpcsStaleMs = 1000;
+
+enum NpcFlags : uint32_t {
+    kNpcHuman = 1u << 0,  // ActorTypeNPC (a person); otherwise a creature
+};
+
+struct Npc {
+    uint32_t formId;  // the reference's form ID (stable while it lives)
+    uint32_t flags;
+    float pos[3];     // DD global, feet
+    float heading;    // Skyrim's angle Z, radians (0 = north, clockwise)
+};
+
+struct Npcs {
+    uint32_t magic;
+    uint32_t version;
+    volatile uint32_t seq;  // seqlock, as in State
+    uint32_t count;
+    uint64_t updates;  // writer increments every write
+    uint32_t writerTick;  // GetTickCount() of the last write
+    uint32_t reserved;
+    Npc npcs[kMaxNpcs];
+};
+
+static_assert(sizeof(Npc) == 24);
+static_assert(sizeof(Npcs) == 32 + 8 * 24);
+
 static_assert(offsetof(CameraCmd, updates) == 16);
 static_assert(offsetof(CameraCmd, pos) == 32);
 static_assert(offsetof(CameraCmd, body) == 72);

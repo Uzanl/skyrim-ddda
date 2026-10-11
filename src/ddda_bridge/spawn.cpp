@@ -21,6 +21,9 @@
 // handler records each write (instruction after it, new value, the stack) and continues.
 #include "spawn.h"
 
+#include "../common/bridge_shared.h"
+#include "damage_log.h"
+
 #include <windows.h>
 #include <tlhelp32.h>
 
@@ -344,9 +347,9 @@ void PinEnemyArchives() {
 
 // --- synthetic spawn ("spawnkind ID", docs/ddda-memory.md "Loading any enemy") ---
 // Nothing copied from a real creation: the kind row comes from the static table, the
-// archive is requested by ID (and pinned), the record (cSetInfoEnemy) and the layout
-// (cLayoutSetEnemy) are new default instances (MtDTI vtable slot 1 = newInstance, no
-// arguments), and the record gets the spot as its mPosition.
+// archive is requested by ID (and pinned), the record (cSetInfoEnemy), the layout
+// (cLayoutSetEnemy) and its cGroupParam are new default instances (MtDTI vtable slot 1 =
+// newInstance, no arguments), and the record gets the spot as its mPosition.
 constexpr uintptr_t kKindTable = 0x110F730;  // image-relative; 112 rows of 0x10
 constexpr int kKinds = 112;
 constexpr uintptr_t kArcMgr = 0x14D9280, kRequestArc = 0x188C0;
@@ -359,14 +362,16 @@ constexpr ULONGLONG kArcTimeoutMs = 20000;
 using RequestFn = int(__stdcall*)(uint32_t mgr, uint32_t id, uint32_t* res, uint32_t prio, uint32_t flag);
 
 volatile LONG g_kind = 0;
-struct Synth {
+
+// Archives requested by ID (one entry per kind; pinned once loaded). Arisen's thread only.
+struct Arc {
     LONG kind;
     uint32_t res;
     int handle;
     bool pinned;
     ULONGLONG since;
 };
-Synth g_syn = {};
+Arc g_arcs[8] = {};
 
 uint32_t g_faultAt = 0;
 int FaultFilter(EXCEPTION_POINTERS* e) {
@@ -393,89 +398,357 @@ uint32_t NewInstance(uint32_t dti) {
     return obj;
 }
 
-// Arisen's thread. Returns true when this request is finished (created or given up).
-bool SyntheticTick(uintptr_t arisen) {
+// 1 = the kind's archive is loaded (and pinned), 0 = still loading, -1 = failed (why set).
+int EnsureArchive(LONG kind, const char** why) {
     ULONGLONG now = GetTickCount64();
-    LONG kind = g_kind;
-    if (g_syn.kind != kind) {
-        g_syn = {};
-        g_syn.kind = kind;
-        g_syn.handle = -1;
-        g_syn.since = now;
+    Arc* a = nullptr;
+    for (Arc& x : g_arcs)
+        if (x.kind == kind) a = &x;
+    if (!a) {
+        for (Arc& x : g_arcs)
+            if (!x.kind && !a) a = &x;
+        if (!a) {
+            *why = "kind: too many kinds";
+            return -1;
+        }
+        *a = {};
+        a->kind = kind;
+        a->handle = -1;
+        a->since = now;
     }
-    if (g_used >= kSlots) return true;
-    Result& r = g_results[g_resultCount % kResults];
-    auto finish = [&](const char* why) {
-        r = {};
-        r.why = why;
-        InterlockedIncrement(&g_resultCount);
-        return true;
-    };
-    uint32_t row = KindRow(kind);
-    if (!row) return finish("kind: no row with that archive ID in the kind table");
-    if (!g_syn.res && g_syn.handle < 0) {
+    if (!a->res && a->handle < 0) {
         int handle = -1;
-        uint32_t* slot = &g_syn.res;
+        uint32_t* slot = &a->res;
         uint32_t mgr = U32(g_base + kArcMgr);
         auto request = reinterpret_cast<RequestFn>(g_base + kRequestArc);
         __try {
             handle = request(mgr, static_cast<uint32_t>(kind), slot, 2, 1);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
-            g_syn.kind = 0;
-            return finish("kind: FAULT requesting the archive");
+            a->kind = 0;
+            *why = "kind: FAULT requesting the archive";
+            return -1;
         }
-        g_syn.handle = handle;
-        if (handle < 0 && !g_syn.res) {
-            g_syn.kind = 0;
-            return finish("kind: the archive request returned nothing");
+        a->handle = handle;
+        if (handle < 0 && !a->res) {
+            a->kind = 0;
+            *why = "kind: the archive request returned nothing";
+            return -1;
         }
     }
-    uint32_t st = g_syn.res ? U32(g_syn.res + kResState) : 0;
+    uint32_t st = a->res ? U32(a->res + kResState) : 0;
     if (st & 0x40) {
-        g_syn.kind = 0;  // retry from scratch next time
-        return finish("kind: the archive failed to load");
+        a->kind = 0;  // retry from scratch next time
+        *why = "kind: the archive failed to load";
+        return -1;
     }
-    if (!(st & 1)) return now - g_syn.since > kArcTimeoutMs ? finish("kind: archive not loaded after 20 s") : false;
-    if (!g_syn.pinned) {
+    if (!(st & 1)) {
+        if (now - a->since <= kArcTimeoutMs) return 0;
+        a->kind = 0;
+        *why = "kind: archive not loaded after 20 s";
+        return -1;
+    }
+    if (!a->pinned) {
         uint32_t mgr = U32(g_base + kResourceMgr);
         auto* lock = reinterpret_cast<CRITICAL_SECTION*>(mgr + kResLock);
-        auto* ref = reinterpret_cast<volatile LONG*>(g_syn.res + kResRef);
+        auto* ref = reinterpret_cast<volatile LONG*>(a->res + kResRef);
         __try {
             EnterCriticalSection(lock);
             ++*ref;
             LeaveCriticalSection(lock);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return finish("kind: FAULT pinning the archive");
+            *why = "kind: FAULT pinning the archive";
+            return -1;
         }
-        g_syn.pinned = true;
+        a->pinned = true;
     }
-    float g[3];
-    if (!SpotGlobal(arisen, g)) return finish("no spot (tile or Arisen unknown)");
+    return 1;
+}
+
+// Creates one enemy of `kind` (archive loaded) at global g. Fills r (unit, fault).
+void CreateAt(LONG kind, const float* g, Result& r) {
     r = {};
+    uint32_t row = KindRow(kind);
+    if (!row) {
+        r.why = "kind: no row with that archive ID in the kind table";
+        return;
+    }
     uint32_t rec = 0, lay = 0, grp = 0;
     __try {
         rec = NewInstance(static_cast<uint32_t>(g_base + kRecordDti));
         lay = NewInstance(static_cast<uint32_t>(g_base + kLayoutDti));
         grp = NewInstance(static_cast<uint32_t>(g_base + kGroupDti));
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return finish("kind: FAULT creating the record, layout or group");
+        r.why = "kind: FAULT creating the record, layout or group";
+        return;
     }
-    if (!rec || !lay || !grp) return finish("kind: newInstance returned 0");
+    if (!rec || !lay || !grp) {
+        r.why = "kind: newInstance returned 0";
+        return;
+    }
     memcpy(reinterpret_cast<void*>(lay + kLayoutGroup), &grp, 4);
-    Slot& s = g_slots[g_used];
-    memset(s.holder, 0, sizeof(s.holder));
-    memcpy(s.holder + 8, &rec, 4);
+    // The holder must outlive the unit (its +4 is copied into the unit): never freed.
+    auto* holder = new uint8_t[kHolderBytes]();
+    memcpy(holder + 8, &rec, 4);
     __try {
-        memcpy(reinterpret_cast<void*>(rec + kRecPos), g, sizeof(g));
-        r.unit = CallCreate(row, lay, reinterpret_cast<uint32_t>(s.holder));
+        memcpy(reinterpret_cast<void*>(rec + kRecPos), g, 3 * sizeof(float));
+        r.unit = CallCreate(row, lay, reinterpret_cast<uint32_t>(holder));
     } __except (FaultFilter(GetExceptionInformation())) {
         r.fault = true;
         r.faultAt = g_faultAt;
     }
     r.record = rec;
     if (r.unit) Read(r.unit + kPos, r.pos, sizeof(r.pos));
-    InterlockedIncrement(&g_used);
+}
+
+// Arisen's thread. Returns true when this request is finished (created or given up).
+bool SyntheticTick(uintptr_t arisen) {
+    Result& r = g_results[g_resultCount % kResults];
+    const char* why = nullptr;
+    int st = EnsureArchive(g_kind, &why);
+    if (st == 0) return false;
+    float g[3];
+    if (st < 0) {
+        r = {};
+        r.why = why;
+    } else if (!SpotGlobal(arisen, g)) {
+        r = {};
+        r.why = "no spot (tile or Arisen unknown)";
+    } else {
+        CreateAt(g_kind, g, r);
+    }
     InterlockedIncrement(&g_resultCount);
+    return true;
+}
+
+// --- stand-ins for Skyrim NPCs ("standins", docs/ddda-memory.md "Stand-ins") ---
+// One DDDA enemy per hostile Skyrim NPC that DDDAGhosts publishes (bridge::Npcs): a human
+// (he00_00) for a person, a wolf (em0200) for anything else. Its AI stays on; after each of
+// its move()s it is put back at the NPC's spot (x/z, height on the first placement), so the
+// pawns fight it where the NPC is in Skyrim. It takes no damage (ApplyDamage is zeroed for
+// it, the hit reaction still plays); the damage is summed for the NPC (step 2, not done).
+// When the NPC is gone for 1 s, the stand-in gets the kill request (state 3 in +4, as the
+// game writes it).
+constexpr LONG kHumanKind = 0x6E5, kCreatureKind = 0x49;
+constexpr ULONGLONG kNpcGoneMs = 1000;
+constexpr int kMaxStandins = static_cast<int>(bridge::kMaxNpcs);
+constexpr uintptr_t kAdjCopies[3] = {0x120, 0x130, 0x140}, kAdjVelocity = 0x150;
+constexpr uintptr_t kScrAdjustVt = 0x119704C;  // cScrAdjust, image-relative
+
+struct Standin {
+    volatile uint32_t unit;  // 0 = free
+    uint32_t formId, vt, adj;
+    volatile LONG placeY;    // set the height at the next pin
+    float target[3];         // tile-local
+    ULONGLONG lastSeen;
+    volatile LONG damage;    // summed damage taken, x10 (fixed point)
+    LONG kind;
+};
+Standin g_si[kMaxStandins] = {};
+volatile LONG g_standinsOn = 0;
+const bridge::Npcs* g_npcView = nullptr;
+
+struct StandinEvent {
+    char what[24];
+    uint32_t formId, unit;
+    float pos[3];
+    const char* why;
+};
+constexpr LONG kEvents = 32;
+StandinEvent g_events[kEvents];
+volatile LONG g_eventCount = 0;
+LONG g_eventsLogged = 0;
+
+void Event(const char* what, const Standin& s, const char* why = nullptr) {
+    StandinEvent& e = g_events[g_eventCount % kEvents];
+    strcpy_s(e.what, what);
+    e.formId = s.formId;
+    e.unit = s.unit;
+    memcpy(e.pos, s.target, sizeof(e.pos));
+    e.why = why;
+    InterlockedIncrement(&g_eventCount);
+}
+
+Standin* StandinOf(uint32_t unit) {
+    if (!unit) return nullptr;
+    for (Standin& s : g_si)
+        if (s.unit == unit) return &s;
+    return nullptr;
+}
+
+// Each stand-in class's move() is wrapped once (vtable in the image's data, slot 8 in its
+// code), as hijack.cpp does.
+using MoveFnT = void(__thiscall*)(void*);
+struct PatchedVt {
+    uint32_t vt;
+    MoveFnT orig;
+};
+PatchedVt g_moveVts[4];
+volatile LONG g_moveVtCount = 0;
+
+void PinStandin(Standin& s, uintptr_t self) {
+    __try {
+        auto* p = reinterpret_cast<volatile float*>(self + kPos);
+        p[0] = s.target[0];
+        p[2] = s.target[2];
+        if (InterlockedExchange(&s.placeY, 0)) p[1] = s.target[1];
+        if (uintptr_t adj = s.adj) {
+            for (uintptr_t off : kAdjCopies) {
+                auto* v = reinterpret_cast<volatile float*>(adj + off);
+                v[0] = p[0];
+                v[1] = p[1];
+                v[2] = p[2];
+            }
+            auto* vel = reinterpret_cast<volatile float*>(adj + kAdjVelocity);
+            vel[0] = vel[2] = 0.0f;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+void __fastcall StandinMove(void* self, void* /*edx*/) {
+    uint32_t vt = *reinterpret_cast<uint32_t*>(self);
+    MoveFnT orig = nullptr;
+    for (LONG i = 0; i < g_moveVtCount; ++i)
+        if (g_moveVts[i].vt == vt) orig = g_moveVts[i].orig;
+    if (orig) orig(self);
+    Standin* s = StandinOf(reinterpret_cast<uint32_t>(self));
+    if (s && g_standinsOn && s->vt == vt) PinStandin(*s, reinterpret_cast<uintptr_t>(self));
+}
+
+bool WrapMove(uint32_t vt) {
+    for (LONG i = 0; i < g_moveVtCount; ++i)
+        if (g_moveVts[i].vt == vt) return true;
+    if (g_moveVtCount >= 4 || vt < g_base + 0x1000000 || vt >= g_base + 0x1400000) return false;
+    auto* slot = reinterpret_cast<uint32_t*>(vt + 8 * 4);
+    uint32_t fn = U32(reinterpret_cast<uintptr_t>(slot));
+    if (fn < g_base + 0x1000 || fn >= g_base + 0x1000000) return false;
+    DWORD old;
+    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old)) return false;
+    g_moveVts[g_moveVtCount].vt = vt;
+    g_moveVts[g_moveVtCount].orig = reinterpret_cast<MoveFnT>(fn);
+    InterlockedIncrement(&g_moveVtCount);
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(slot), static_cast<LONG>(reinterpret_cast<uintptr_t>(&StandinMove)));
+    VirtualProtect(slot, 4, old, &old);
+    return true;
+}
+
+void KillUnit(uint32_t unit) {
+    __try {
+        auto* st = reinterpret_cast<volatile LONG*>(unit + 4);
+        LONG v = *st;
+        InterlockedCompareExchange(st, (v & ~4) | 3, v);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+bool ReadNpcs(bridge::Npcs* out) {
+    if (!g_npcView) {
+        HANDLE h = OpenFileMappingW(FILE_MAP_READ, FALSE, bridge::kNpcsMappingName);
+        if (!h) return false;
+        g_npcView = static_cast<const bridge::Npcs*>(MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(bridge::Npcs)));
+        CloseHandle(h);
+        if (!g_npcView) return false;
+    }
+    if (g_npcView->magic != bridge::kNpcsMagic) return false;
+    for (int tries = 0; tries < 100; ++tries) {
+        uint32_t a = g_npcView->seq;
+        if (a & 1) continue;
+        MemoryBarrier();
+        memcpy(out, const_cast<const bridge::Npcs*>(g_npcView), sizeof(*out));
+        MemoryBarrier();
+        if (g_npcView->seq == a) return GetTickCount() - out->writerTick <= bridge::kNpcsStaleMs;
+    }
+    return false;
+}
+
+void RemoveStandin(Standin& s, const char* why) {
+    if (s.unit && U32(s.unit) == s.vt) KillUnit(s.unit);
+    Event("removed", s, why);
+    s.unit = 0;
+}
+
+// Arisen's thread, every frame while "standins" is on in a session.
+void StandinTick() {
+    ULONGLONG now = GetTickCount64();
+    bridge::Npcs npcs;
+    if (!ReadNpcs(&npcs)) npcs.count = 0;
+    if (npcs.count > bridge::kMaxNpcs) npcs.count = 0;
+    const float ox = (static_cast<float>(g_tileN) - 50.0f) * kTile, oz = (static_cast<float>(g_tileM) - 50.0f) * kTile;
+    bool seen[bridge::kMaxNpcs] = {};
+    for (Standin& s : g_si) {
+        if (!s.unit) continue;
+        if (U32(s.unit) != s.vt) {  // destroyed by DDDA: made again next frame
+            Event("lost", s, "destroyed by DDDA");
+            s.unit = 0;
+            continue;
+        }
+        bool found = false;
+        for (uint32_t i = 0; i < npcs.count; ++i)
+            if (npcs.npcs[i].formId == s.formId) {
+                const float* g = npcs.npcs[i].pos;
+                s.target[0] = g[0] - ox;
+                s.target[1] = g[1];
+                s.target[2] = g[2] - oz;
+                s.lastSeen = now;
+                seen[i] = found = true;
+            }
+        if (!found && now - s.lastSeen > kNpcGoneMs) RemoveStandin(s, "the NPC is gone");
+    }
+    if (!g_originValid) return;
+    // At most one new stand-in per frame.
+    for (uint32_t i = 0; i < npcs.count; ++i) {
+        if (seen[i]) continue;
+        Standin* free = nullptr;
+        for (Standin& s : g_si)
+            if (!s.unit && !free) free = &s;
+        if (!free) return;
+        const bridge::Npc& n = npcs.npcs[i];
+        LONG kind = (n.flags & bridge::kNpcHuman) ? kHumanKind : kCreatureKind;
+        const char* why = nullptr;
+        int st = EnsureArchive(kind, &why);
+        if (st == 0) return;  // loading: try again next frame
+        Standin s = {};
+        s.formId = n.formId;
+        s.kind = kind;
+        s.target[0] = n.pos[0] - ox;
+        s.target[1] = n.pos[1];
+        s.target[2] = n.pos[2] - oz;
+        if (st < 0) {
+            Event("not made", s, why);
+            return;
+        }
+        Result r;
+        CreateAt(kind, n.pos, r);
+        if (!r.unit) {
+            Event("not made", s, r.fault ? "FAULT in the creation" : r.why);
+            return;
+        }
+        s.vt = U32(r.unit);
+        for (uintptr_t off = 0; off < 0x6000; off += 4)
+            if (U32(r.unit + off) == g_base + kScrAdjustVt) {
+                s.adj = r.unit + static_cast<uint32_t>(off);
+                break;
+            }
+        s.placeY = 1;
+        s.lastSeen = now;
+        if (!WrapMove(s.vt)) {
+            KillUnit(r.unit);
+            s.unit = r.unit;
+            Event("not made", s, "could not wrap its move()");
+            return;
+        }
+        *free = s;
+        free->unit = r.unit;  // last: the move hook and the damage filter see it from now on
+        Event("made", *free);
+        return;
+    }
+}
+
+// damage_log's filter (game threads, inside ApplyDamage): a stand-in's damage is zeroed.
+bool StandinDamage(uint32_t owner, float damage) {
+    Standin* s = StandinOf(owner);
+    if (!s || !g_standinsOn) return false;
+    InterlockedExchangeAdd(&s->damage, static_cast<LONG>(damage * 10.0f));
     return true;
 }
 
@@ -533,7 +806,23 @@ void SetRequest(int n, bool session, bool originValid, int tileN, int tileM) {
     }
 }
 
+void SetStandins(bool on) {
+    on = on && g_session;
+    if (on == (g_standinsOn != 0)) return;
+    InterlockedExchange(&g_standinsOn, on ? 1 : 0);
+    if (on) damagelog::SetFilter(&StandinDamage);
+    g_log("standins %s", on ? "ON (one DDDA enemy at each hostile Skyrim NPC)" : "OFF");
+}
+
 void ArisenTick(uintptr_t arisen) {
+    if (g_session) {
+        if (g_standinsOn) {
+            StandinTick();
+        } else {
+            for (Standin& s : g_si)
+                if (s.unit) RemoveStandin(s, "standins off");
+        }
+    }
     if (!g_session || !g_pending) return;
     if (g_kind) {
         if (SyntheticTick(arisen)) InterlockedDecrement(&g_pending);
@@ -544,8 +833,31 @@ void ArisenTick(uintptr_t arisen) {
 }
 
 void Poll() {
-    static ULONGLONG lastPin = 0;
+    static ULONGLONG lastPin = 0, lastStatus = 0;
     ULONGLONG now = GetTickCount64();
+    for (; g_eventsLogged < g_eventCount; ++g_eventsLogged) {
+        const StandinEvent& e = g_events[g_eventsLogged % kEvents];
+        g_log("standin %s: NPC %08X unit %08X at local (%.0f, %.0f, %.0f)%s%s", e.what, e.formId, e.unit, e.pos[0],
+              e.pos[1], e.pos[2], e.why ? ": " : "", e.why ? e.why : "");
+    }
+    if (g_standinsOn && now - lastStatus >= 5000) {
+        lastStatus = now;
+        char line[600];
+        size_t len = 0;
+        line[0] = 0;
+        int n = 0;
+        for (const Standin& s : g_si) {
+            if (!s.unit) continue;
+            ++n;
+            float p[3] = {};
+            Read(s.unit + kPos, p, sizeof(p));
+            int k = sprintf_s(line + len, sizeof(line) - len, " %08X@(%.0f,%.0f,%.0f) dmg %.0f", s.formId, p[0], p[1],
+                              p[2], s.damage / 10.0f);
+            if (k > 0) len += k;
+            if (len > sizeof(line) - 80) break;
+        }
+        g_log("standins: %d%s", n, line);
+    }
     if (g_session && now - lastPin >= 2000) {
         lastPin = now;
         PinEnemyArchives();

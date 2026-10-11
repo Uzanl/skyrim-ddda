@@ -502,3 +502,20 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   6 s; **`spawnkind 6E5` requested `rom\h_enemy\he00_00` by ID (not loaded before), and 0.17
   s later created a `uHumanEnemy` (1300 HP, like the bandits)**, killed by the party in about
   1 s. So any of the 112 kinds can be created anywhere.
+
+## Stand-ins for Skyrim NPCs (built 2026-10-10, not tested)
+
+- **Skyrim side** (`src/skse_ghosts/plugin.cpp`, `PublishNpcs`, every update while the
+  terrain link is on): living actors hostile to the player within 40 m (process lists' high
+  actors), nearest first, up to 8, into `Local\DDDA_SkyrimBridge_npcs_v1` (`bridge::Npcs`):
+  form ID, `kNpcHuman` (race keyword ActorTypeNPC), DD global position (the inverse of the
+  label mapping: `dd = cmd.pos + (sky - skyCam) / 0.7` with Skyrim (x, y, z) -> DD (x, z, -y))
+  and heading. Log `npcs: N hostile within 40 m`.
+- **DDDA side** (`spawn.cpp`, line `standins` in `ddda_experiment.txt`, bridge session
+  only): every Arisen frame, one stand-in per published NPC: a synthetic `he00_00` human
+  for people, an `em0200` wolf otherwise. Its class's move() is wrapped; after each move()
+  it is put at the NPC's spot (x/z; height on the first placement; its scenery adjust's copies
+  synced). Its AI stays on. Its damage is zeroed in ApplyDamage (`damage_log` filter, the
+  hit reaction still plays) and summed for step 2. When the NPC is gone for 1 s it gets the
+  kill request (state 3). Logs: `standin made / removed / lost / not made`, and every 5 s
+  `standins: N FORMID@(x,y,z) dmg D`.

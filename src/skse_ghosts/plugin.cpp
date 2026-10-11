@@ -362,6 +362,78 @@ void PublishGround(const bridge::State& st, const bridge::Anchor& an) {
     InterlockedIncrement(reinterpret_cast<volatile LONG*>(&g->seq));  // even: done
 }
 
+// --- Hostile NPCs for DDDA's stand-ins -----------------------------------------------
+
+constexpr float kNpcRange = 40.0f * 100.0f * bridge::kDDToSkyrim;  // 40 m in Skyrim units
+bridge::Npcs* g_npcs = nullptr;
+
+bridge::Npcs* NpcsOut() {
+    if (g_npcs) return g_npcs;
+    HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(bridge::Npcs),
+                                  bridge::kNpcsMappingName);
+    if (!h) return nullptr;
+    g_npcs = static_cast<bridge::Npcs*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(bridge::Npcs)));
+    if (g_npcs) {
+        g_npcs->magic = bridge::kNpcsMagic;
+        g_npcs->version = bridge::kNpcsVersion;
+        spdlog::info("npc mapping ready");
+    }
+    return g_npcs;
+}
+
+// Living actors hostile to the player within kNpcRange, nearest first, mapped to DDDA's
+// global coordinates with the last camera command (the inverse of ReadPawns). Written
+// only while the terrain link is on; otherwise the list is emptied.
+void PublishNpcs() {
+    bridge::Npcs* out = NpcsOut();
+    if (!out) return;
+    if (!g_cam) g_cam = OpenView<bridge::CameraCmd>(bridge::kCamMappingName);
+    bridge::CameraCmd cmd;
+    const bool linked = g_cam && g_cam->magic == bridge::kCamMagic && Snapshot(g_cam, &cmd) &&
+                        (cmd.flags & bridge::kCamOverride) && (cmd.flags & bridge::kGlobalCoords);
+    struct Found {
+        float dist;
+        bridge::Npc npc;
+    };
+    std::array<Found, 32> found;
+    size_t n = 0;
+    auto* player = RE::PlayerCharacter::GetSingleton();
+    auto* lists = RE::ProcessLists::GetSingleton();
+    if (linked && player && lists) {
+        const RE::NiPoint3 me = player->GetPosition();
+        for (auto& handle : lists->highActorHandles) {
+            auto actor = handle.get();
+            if (!actor || actor.get() == player || actor->IsDead() || !actor->Is3DLoaded()) continue;
+            if (!actor->IsHostileToActor(player)) continue;
+            const RE::NiPoint3 p = actor->GetPosition();
+            const float d = p.GetDistance(me);
+            if (d > kNpcRange || n >= found.size()) continue;
+            bridge::Npc npc{};
+            npc.formId = actor->GetFormID();
+            auto* race = actor->GetRace();
+            if (race && race->HasKeywordString("ActorTypeNPC")) npc.flags |= bridge::kNpcHuman;
+            npc.pos[0] = cmd.pos[0] + (p.x - cmd.skyPose[0]) / bridge::kDDToSkyrim;
+            npc.pos[1] = cmd.pos[1] + (p.z - cmd.skyPose[2]) / bridge::kDDToSkyrim;
+            npc.pos[2] = cmd.pos[2] - (p.y - cmd.skyPose[1]) / bridge::kDDToSkyrim;
+            npc.heading = actor->GetAngleZ();
+            found[n++] = {d, npc};
+        }
+        std::sort(found.begin(), found.begin() + n, [](const Found& a, const Found& b) { return a.dist < b.dist; });
+    }
+    const uint32_t count = static_cast<uint32_t>((std::min)(n, static_cast<size_t>(bridge::kMaxNpcs)));
+    static uint32_t lastCount = 0xFFFFFFFF;
+    if (count != lastCount) {
+        spdlog::info("npcs: {} hostile within 40 m{}", count, linked ? "" : " (not linked)");
+        lastCount = count;
+    }
+    InterlockedIncrement(reinterpret_cast<volatile LONG*>(&out->seq));  // odd: writing
+    out->count = count;
+    for (uint32_t i = 0; i < count; ++i) out->npcs[i] = found[i].npc;
+    out->writerTick = GetTickCount();
+    out->updates++;
+    InterlockedIncrement(reinterpret_cast<volatile LONG*>(&out->seq));  // even: done
+}
+
 bool InWorld() {
     auto* player = RE::PlayerCharacter::GetSingleton();
     return player && player->GetParentCell() && !RE::UI::GetSingleton()->GameIsPaused();
@@ -397,6 +469,7 @@ void Update() {
     if (ReadLink(&st, &an)) PublishGround(st, an);
     UpdateGhosts();
     UpdateRipples();
+    PublishNpcs();
     static auto lastSpy = std::chrono::steady_clock::now();
     if (std::chrono::steady_clock::now() - lastSpy > std::chrono::seconds(2)) {
         lastSpy = std::chrono::steady_clock::now();
