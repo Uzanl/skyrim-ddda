@@ -4,6 +4,13 @@
 // cLayoutSetEnemy (cGroupParam at +0x74), a flag byte (0 = enemy path), the record holder
 // (+4 copied into the unit's +0x20F0, +8 the placement record, a cSetInfoEnemy*); ret 0xC;
 // returns the new unit in eax (0 on failure). The record's mPosition (+0x30) is global.
+// An enemy's archive (rArchive "rom\enemy\emNNNN": model, motion, sounds) is released when
+// the party leaves its area; a wolf spawned after the link then stopped DDDA with "Failed
+// open file ... e0200.bmse" (2026-10-10). So, in a session, every enemy archive found in
+// sResource's table ([0x18D0AA0] + 0x40D8, 16384 resource pointers, read live) gets one
+// extra reference (cResource mRefCount +0x48, under sResource's lock at +4, as its release
+// +0x9BA940 does) and stays loaded.
+//
 // Its first 9 bytes are whole instructions (push ebp; mov ebp, esp; and esp, -16;
 // sub esp, 0x34), so they become a jmp to Stub, which records the call and runs them.
 #include "spawn.h"
@@ -24,6 +31,12 @@ constexpr uintptr_t kRecPos = 0x30;
 constexpr size_t kRecBytes = 0x200, kHolderBytes = 0x20;
 constexpr uintptr_t kCamRoot = 0x14D1578, kCamOff = 0xDF0;  // camera position (ddda-memory.md)
 constexpr float kAhead = 400.0f, kTile = 10000.0f;
+
+constexpr uintptr_t kResourceMgr = 0x14D0AA0;  // image-relative [sResource]
+constexpr uintptr_t kResTable = 0x40D8, kResSlots = 16384, kResLock = 4;
+constexpr uintptr_t kArchiveVt = 0x102E2CC;  // rArchive, image-relative
+constexpr uintptr_t kResPath = 0x08, kResRef = 0x48;
+constexpr int kMaxPins = 12;
 
 LogFn g_log = nullptr;
 uintptr_t g_base = 0;
@@ -191,6 +204,38 @@ void RunSpawn(uintptr_t arisen) {
     InterlockedIncrement(&g_resultCount);
 }
 
+uint32_t g_pinned[kMaxPins];
+int g_pinCount = 0;
+
+// Bridge thread, every 2 s in a session.
+void PinEnemyArchives() {
+    uint32_t mgr = U32(g_base + kResourceMgr);
+    if (!mgr || g_pinCount >= kMaxPins) return;
+    static uint32_t table[kResSlots];
+    if (!Read(mgr + kResTable, table, sizeof(table))) return;
+    for (uint32_t r : table) {
+        if (!r || U32(r) != g_base + kArchiveVt) continue;
+        char path[24] = {};
+        if (!Read(r + kResPath, path, sizeof(path) - 1) || strncmp(path, "rom\\enemy\\em", 12) != 0) continue;
+        bool known = false;
+        for (int i = 0; i < g_pinCount; ++i) known |= g_pinned[i] == r;
+        if (known) continue;
+        auto* lock = reinterpret_cast<CRITICAL_SECTION*>(mgr + kResLock);
+        LONG ref = 0;
+        __try {
+            EnterCriticalSection(lock);
+            ref = ++*reinterpret_cast<volatile LONG*>(r + kResRef);
+            LeaveCriticalSection(lock);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            g_log("spawn: pinning %s faulted", path);
+            continue;
+        }
+        g_pinned[g_pinCount++] = r;
+        g_log("spawn: pinned enemy archive %s (%08X), references now %ld", path, r, ref);
+        if (g_pinCount >= kMaxPins) break;
+    }
+}
+
 }  // namespace
 
 void Install(LogFn log, uintptr_t base) {
@@ -244,6 +289,12 @@ void ArisenTick(uintptr_t arisen) {
 }
 
 void Poll() {
+    static ULONGLONG lastPin = 0;
+    ULONGLONG now = GetTickCount64();
+    if (g_session && now - lastPin >= 2000) {
+        lastPin = now;
+        PinEnemyArchives();
+    }
     LONG caps = g_captures;
     if (caps != g_capturesLogged) {
         Capture c;

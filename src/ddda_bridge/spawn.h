@@ -2,7 +2,8 @@
 // "create an enemy from its placement" (+0x3613D0) is watched; each real call's arguments
 // and a copy of its placement record are kept. With a line "spawn N" in ddda_experiment.txt
 // (bridge session only), every change of N calls it again once, from the Arisen's move(),
-// with a copy of the last record moved 4 m in front of the Arisen.
+// with a copy of the last record moved 4 m in front of the Arisen. In a session, enemy
+// archives are kept loaded (one extra reference), so a spawn after the link has them.
 #pragma once
 
 #include <cstdint>

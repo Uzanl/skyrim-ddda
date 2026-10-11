@@ -410,7 +410,25 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
     `nativePC\sound\se\em\e02\e0200\e0200.bmse` 3"**: the wolf's resources had been released when the party left the
     wolves' area, and the new wolf asked for them. **An enemy's archive (model, sounds,
     parameters) must be loaded before it is created** (`cLayoutSetEnemy::cEmArcLoad`, vt
-    `0x1593E78`); next, find how cEmArcLoad loads it and keep it loaded.
+    `0x1593E78`).
+- **Enemy archives and keeping them loaded (2026-10-10):**
+  - `cEmArcLoad` (created at `+0x360EF0`, 0x18 bytes, kept in a list at `+0x80` of the
+    layout owner) makes a loader at `+0x10` (0x60 bytes, vt `0x155A110`, init `+0x18DF0`):
+    up to 4 entries of 0x14 at `+8` (resource, id, handle -1, ...), count `+0x54`, then
+    `+0x58` = 2, `+0x5C` = 1 to start. `+0x18F20(eax = loader, id)` adds an entry; `+0x19050`
+    releases them all (`+0x9E0B90` per resource = sResource vfunc `+0x38`). cEmArcLoad
+    objects are temporary: none were alive in game once the wolves were loaded.
+  - `cResource` properties: mPath (`+0x08`), mRefCount `+0x48`, mAttr `+0x4C`, mSize `+0x54`,
+    mID `+0x58`. sResource (`[0x18D0AA0]`, vt `0x1560480`) release `+0x9BA940`: lock at `+4`,
+    `--mRefCount`, unload at 0.
+  - **sResource's table of loaded resources: `+0x40D8`, 16384 pointers** (read live: 6464
+    entries in plain DDDA near wolves). The wolf's archive is an `rArchive` (vt `0x142E2CC`)
+    with the path **`rom\enemy\em0200`** (6.1 MB, 9 references with 10 wolves); also loaded:
+    `rom\enemy\em0100` (29 MB) and the pawns' chat `rom\pwnmsg\em\emNNNN_*`. The wolves do
+    not point to their archive directly.
+  - **Pinning (built 2026-10-10, not tested):** in a session, `spawn.cpp` scans that table
+    every 2 s and gives each `rom\enemy\em*` archive one extra reference, under sResource's
+    lock (up to 12; logged `spawn: pinned enemy archive`).
   - `src/ddda_bridge/spawn.cpp`: it hooks
     `+0x3613D0`'s entry (9 bytes `55 8B EC 83 E4 F0 83 EC 34`), keeps the last real call (eax
     object, layout, holder) with a copy of its record, and on each change of `spawn N` in
