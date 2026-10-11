@@ -385,4 +385,12 @@ windowless `pythonw` started by the DDDA bridge, which Windows 11 may power-thro
 (EcoQoS). `stream.py` now opts out at start (`full_speed`: `SetProcessInformation`
 ProcessPowerThrottling, execution speed and timer resolution not throttled, and above-normal
 priority) and logs `power throttling off`; the tile line also gives the collision's share.
-Applied to the running streamer at 22:46: see below for the measured effect.
+Applied to the running streamer at 22:46: tiles still took 1-13 s. **Correction:** the
+0.7 s comparison was wrong (it used the mapping after a leap, so other Skyrim ground). With
+the current mapping a slow tile (55m48n) took 19 s from a console too (collision 13.1 s,
+graph 6.0 s): the cost is the code where live Havok cells cover the tile. cProfile:
+`havok.ramps` 7.0 s (of it `raster` 5.4 s, 20 rasterisations per tile), `sbcgen.build`
+5.6 s (pure-Python BVH: `_bounds` 2.6 s), `snap`/`clearance` 3.9 s, `reach` 3.7 s,
+`sample` 3.2 s. A leap generates 25 tiles first: 277.7 s on 2026-10-10 22:42 (the "4
+minutes" stall). Next: tiles in parallel worker processes (12 logical CPUs here), and
+reusing a tile's rasters. The throttling opt-out stays (harmless).
