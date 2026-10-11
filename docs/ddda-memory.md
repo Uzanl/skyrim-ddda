@@ -486,7 +486,7 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   `+0x39F630` (0x110 bytes), cLayoutSetEnemy `+0x360210` (0x98 bytes), uEm0200 `+0x4EFD20`
   (the function seen on the spawn chains). DTIs are built at start-up, so they are empty on
   disk. cSetInfoEnemy0200's DTI is `0x1996040`.
-- **Synthetic spawn (built 2026-10-10, not tested):** `spawnkind ID` (archive ID, hex) in
+- **Synthetic spawn (verified in game 2026-10-10):** `spawnkind ID` (archive ID, hex) in
   `ddda_experiment.txt` makes `spawn N` build everything itself: the kind row with that
   archive ID, the archive requested by ID (`+0x188C0`, then pinned), a new cSetInfoEnemy
   record with the spot as mPosition, a new cLayoutSetEnemy, an empty holder pointing to the
@@ -497,3 +497,8 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   layout's cGroupParam (`+0x74`) with no null check, and a default cLayoutSetEnemy has none.
   Fix (built, not tested): a default cGroupParam (DTI `0x19A8804`, newInstance `+0x8C2B00`,
   0x1E8 bytes) in the layout's `+0x74`; faults now log their address.
+  **Verified in game 2026-10-10 21:39** (bridge session, linked to Skyrim, nothing copied):
+  `spawnkind 49` made a wolf 4 m from the Arisen that moved and was killed by the party in
+  6 s; **`spawnkind 6E5` requested `rom\h_enemy\he00_00` by ID (not loaded before), and 0.17
+  s later created a `uHumanEnemy` (1300 HP, like the bandits)**, killed by the party in about
+  1 s. So any of the 112 kinds can be created anywhere.
