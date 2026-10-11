@@ -550,3 +550,16 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   hits of a fifth or more, and StartCombat. So the NPC dies after as many hits as the DDDA
   enemy would. Log in DDDAGhosts.log: `hit FORMID NAME: DDDA d (p% of the stand-in) ->
   Skyrim D of MAX`.
+- **Crash with stand-ins (2026-10-10 22:27 and 22:49, same site):** access violation at
+  `+0xD4BC62` (`mov edx, [ebx+4]` with `ebx = [[ebp+8]+0xC][0]` = null while the count byte
+  `+0x12` is nonzero; then word tables `[edx+0x62]`, `[esi+0xC8]`: text/index tables). The
+  second dump's stack runs from sUnit's loop (`+0x9BDD4C`) through **the pawn's move()
+  (`+0x753663`, `+0x753776`, `+0x754246`)** to `+0xCB6CCF`, `+0xDBA687` and the crash. Both
+  came 18-45 s after a stand-in was killed. Suspect (not proven): a pawn's comment or voice
+  line about the enemy it fought; those are per enemy kind (`id\message\pawn\em%04d`,
+  `sound\stream\pwn\em%04d\...`, built near `+0x49A00`; the `rom\pwnmsg\em\emNNNN_*`
+  archives were loaded near the wolves) and are not in the archive ID table; far from that
+  area they are not loaded. Next: read `+0x49A00` and the crash function's caller.
+- Also seen: some stand-ins fell hundreds of metres (lethal hits at y 33420 and 63438 while
+  the party was at 94183): only x/z are pinned after the first placement, so a stand-in
+  over a hole falls. Pin the height too, or keep it at the NPC's height.
