@@ -436,6 +436,101 @@ void PublishNpcs() {
     InterlockedIncrement(reinterpret_cast<volatile LONG*>(&out->seq));  // even: done
 }
 
+// --- Stand-in hits -> Skyrim's hit pipeline -------------------------------------------
+// From SkyCraft (chasmlol/SkyCraft, MIT, skse/src/Combat.cpp): ID 38627 is Skyrim's melee
+// HitFrame handler; it builds a HitData (ctor 43995, Populate) and hands it to ID 38586,
+// which applies damage, blocking, hit reactions and stagger, the pain voice, the hit event
+// and kill credit. The address is used only if the engine's own call site matches.
+using ProcessHitFn = void(RE::Actor*, RE::HitData&);
+using HitDataCtorFn = RE::HitData*(RE::HitData*);
+ProcessHitFn* g_processHit = nullptr;
+HitDataCtorFn* g_hitDataCtor = nullptr;
+const bridge::Hits* g_hitsView = nullptr;
+long g_hitsRead = -1;
+
+void ResolveHitPipeline() {
+    const auto site = REL::ID(38627).address() + 0x4A8;
+    const auto* code = reinterpret_cast<const std::uint8_t*>(site);
+    const auto target = REL::ID(38586).address();
+    std::int32_t rel = 0;
+    std::memcpy(&rel, code + 1, 4);
+    if (code[0] != 0xE8 || site + 5 + rel != target) {
+        spdlog::warn("hit pipeline: melee call site does not match; stand-in hits use plain damage");
+        return;
+    }
+    g_processHit = reinterpret_cast<ProcessHitFn*>(target);
+    g_hitDataCtor = reinterpret_cast<HitDataCtorFn*>(REL::ID(43995).address());
+    spdlog::info("hit pipeline: stand-in hits go through Skyrim's hit processing");
+}
+
+RE::NiAVObject* HitNode(RE::Actor* a) {
+    auto* root = a->Get3D();
+    if (!root) return nullptr;
+    for (const char* name : {"NPC Spine2 [Spn2]", "NPC Spine1 [Spn1]", "NPC Spine [Spn0]", "NPC Pelvis [Pelv]"})
+        if (auto* node = root->GetObjectByName(name)) return node;
+    return root;
+}
+
+// A pawn's hit on a stand-in, as the Dragonborn's hit with an iron sword (blood, sound):
+// `fraction` of the NPC's max health, staggering when it took a fifth of it or more.
+void ApplyStandinHit(RE::PlayerCharacter* player, RE::Actor* actor, float fraction, float ddDamage) {
+    if (!actor || actor->IsDead()) return;
+    const float maxHealth = actor->GetPermanentActorValue(RE::ActorValue::kHealth);
+    const float damage = std::clamp(fraction, 0.0f, 1.0f) * (maxHealth > 1.0f ? maxHealth : 100.0f);
+    if (!(damage > 0.0f)) return;
+    const float stagger = fraction >= 0.2f ? 0.5f : 0.0f;
+    auto* weapon = RE::TESForm::LookupByID<RE::TESObjectWEAP>(0x00012EB7);  // Iron Sword
+    auto* node = HitNode(actor);
+    RE::NiPoint3 hitPos = node ? node->world.translate : actor->GetPosition();
+    RE::NiPoint3 dir = hitPos - player->GetPosition();
+    dir.z = 0.0f;
+    dir = dir.Length() > 1e-3f ? dir / dir.Length() : RE::NiPoint3{0.0f, 1.0f, 0.0f};
+    if (g_processHit) {
+        alignas(16) std::array<std::byte, sizeof(RE::HitData)> storage{};
+        auto* hit = reinterpret_cast<RE::HitData*>(storage.data());
+        g_hitDataCtor(hit);
+        hit->Populate(player, actor, nullptr);
+        hit->weapon = weapon;
+        hit->hitPosition = hitPos;
+        hit->hitDirection = dir;
+        hit->totalDamage = damage;
+        hit->physicalDamage = damage;
+        hit->resistedPhysicalDamage = 0.0f;
+        hit->resistedTypedDamage = 0.0f;
+        hit->sneakAttackBonus = 1.0f;
+        hit->bonusHealthDamageMult = 1.0f;
+        hit->stagger = stagger;
+        hit->pushBack = 0.0f;
+        hit->flags.reset(RE::HitData::Flag::kPowerAttack, RE::HitData::Flag::kCritical, RE::HitData::Flag::kSneakAttack);
+        hit->flags.set(RE::HitData::Flag::kMeleeAttack);
+        g_processHit(actor, *hit);
+    } else {
+        actor->DoDamage(damage, player, true);
+    }
+    if (auto* impacts = RE::BGSImpactManager::GetSingleton(); impacts && weapon && weapon->impactDataSet && node) {
+        RE::NiPoint3 pick = dir;
+        impacts->PlayImpactEffect(actor, weapon->impactDataSet, node->name.c_str(), pick, 128.0f, false, false);
+    }
+    if (!actor->IsDead() && !actor->IsInCombat()) actor->StartCombat(player);
+    spdlog::info("hit {:08X} {}: DDDA {:.0f} ({:.0f}% of the stand-in) -> Skyrim {:.0f} of {:.0f}{}{}", actor->GetFormID(),
+                 actor->GetDisplayFullName(), ddDamage, fraction * 100.0f, damage, maxHealth, stagger > 0 ? ", stagger" : "",
+                 actor->IsDead() ? ", killed" : "");
+}
+
+void ApplyStandinHits() {
+    if (!g_hitsView) g_hitsView = OpenView<bridge::Hits>(bridge::kHitsMappingName);
+    if (!g_hitsView || g_hitsView->magic != bridge::kHitsMagic) return;
+    const long written = g_hitsView->written;
+    if (g_hitsRead < 0 || written < g_hitsRead || written - g_hitsRead > static_cast<long>(bridge::kHitRing))
+        g_hitsRead = written;  // first look, a restarted DDDA, or too far behind: start from now
+    auto* player = RE::PlayerCharacter::GetSingleton();
+    for (; g_hitsRead < written; ++g_hitsRead) {
+        const bridge::HitEvent& e = g_hitsView->ev[g_hitsRead % bridge::kHitRing];
+        if (static_cast<long>(e.seq) != g_hitsRead + 1) break;  // not finished writing
+        if (player) ApplyStandinHit(player, RE::TESForm::LookupByID<RE::Actor>(e.formId), e.fraction, e.damage);
+    }
+}
+
 bool InWorld() {
     auto* player = RE::PlayerCharacter::GetSingleton();
     return player && player->GetParentCell() && !RE::UI::GetSingleton()->GameIsPaused();
@@ -472,6 +567,7 @@ void Update() {
     UpdateGhosts();
     UpdateRipples();
     PublishNpcs();
+    ApplyStandinHits();
     static auto lastSpy = std::chrono::steady_clock::now();
     if (std::chrono::steady_clock::now() - lastSpy > std::chrono::seconds(2)) {
         lastSpy = std::chrono::steady_clock::now();
@@ -674,6 +770,7 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* skse) {
     }
     havok_export::Reset();
     InstallRippleSpy();
+    ResolveHitPipeline();
     std::thread(UpdateLoop).detach();
     return true;
 }

@@ -802,11 +802,29 @@ void StandinTick() {
 }
 
 // damage_log's filter (game threads, inside ApplyDamage): a stand-in's damage is zeroed.
+bridge::Hits* g_hitRing = nullptr;  // created at Install
+
+// Publishes one hit for DDDAGhosts (game threads).
+void PublishHit(uint32_t formId, float fraction, float damage) {
+    bridge::Hits* h = g_hitRing;
+    if (!h) return;
+    LONG n = InterlockedIncrement(&h->written);
+    bridge::HitEvent& e = h->ev[(n - 1) % bridge::kHitRing];
+    e.seq = 0;
+    e.formId = formId;
+    e.fraction = fraction;
+    e.damage = damage;
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(&e.seq), n);
+}
+
 bool StandinDamage(uint32_t owner, uint32_t vital, float damage) {
     Standin* s = StandinOf(owner);
     if (!s || !g_standinsOn || s->removing) return false;
     s->vital = vital;
     InterlockedExchangeAdd(&s->damage, static_cast<LONG>(damage * 10.0f));
+    float max = 0;
+    if (damage > 0 && Read(vital + kVitalMax, &max, 4) && max > 1.0f && max < 1.0e6f)
+        PublishHit(s->formId, damage / max, damage);
     return true;
 }
 
@@ -848,6 +866,16 @@ void Install(LogFn log, uintptr_t base) {
     g_log(seen == from ? "spawn: enemy creation watched (log-only until a spawn line)"
                        : "spawn: code changed while patching; not hooked");
     AddVectoredExceptionHandler(1, &WatchHandler);
+    HANDLE hm = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(bridge::Hits),
+                                   bridge::kHitsMappingName);
+    if (hm) {
+        auto* h = static_cast<bridge::Hits*>(MapViewOfFile(hm, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(bridge::Hits)));
+        if (h) {
+            h->magic = bridge::kHitsMagic;
+            h->version = bridge::kHitsVersion;
+            g_hitRing = h;
+        }
+    }
 }
 
 void SetTileOrigin(const volatile LONG* n, const volatile LONG* m, const volatile LONG* valid) {

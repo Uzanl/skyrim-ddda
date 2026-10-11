@@ -540,3 +540,13 @@ Nexus dragonsdogma/mods/670, edits enemy placement data inside the stage archive
   `[unit+0x4BC]`; **`[unit+0x1D18]` points to a list of the enemy's vital blocks** (`[+0]` and
   `[+4]`, both owned by the unit). Removal now hits every living vital block it finds there
   (built, not tested).
+- **Step 2, damage to the NPC (built 2026-10-10, not tested):** each zeroed hit on a
+  stand-in is published in `Local\DDDA_SkyrimBridge_hits_v1` (`bridge::Hits`, a 64-event
+  ring): the NPC's form ID and the fraction of the stand-in's DDDA max HP the hit took.
+  DDDAGhosts (`ApplyStandinHits`, every update) applies that fraction of the NPC's own max
+  health as the Dragonborn's hit with an iron sword through Skyrim's hit pipeline (HitData
+  ctor ID 43995, Populate, ProcessHit ID 38586, validated at ID 38627 + 0x4A8, as SkyCraft
+  does; plain DoDamage otherwise), with blood and sound (BGSImpactManager), a stagger for
+  hits of a fifth or more, and StartCombat. So the NPC dies after as many hits as the DDDA
+  enemy would. Log in DDDAGhosts.log: `hit FORMID NAME: DDDA d (p% of the stand-in) ->
+  Skyrim D of MAX`.

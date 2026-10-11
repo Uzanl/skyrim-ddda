@@ -252,6 +252,35 @@ struct Npcs {
     Npc npcs[kMaxNpcs];
 };
 
+// --- Hits on stand-ins (DDDA bridge -> DDDAGhosts) -----------------------------------
+// One event per DDDA hit on a stand-in: the Skyrim NPC it stands for and the fraction of
+// the stand-in's DDDA max HP the hit took (the stand-in itself takes no damage). DDDAGhosts
+// applies that fraction of the NPC's own health through Skyrim's hit pipeline, so the NPC
+// dies after as many hits as the DDDA enemy would. A ring: `written` counts events; event
+// n is at ev[(n - 1) % kHitRing] and carries seq = n once complete.
+inline constexpr wchar_t kHitsMappingName[] = L"Local\\DDDA_SkyrimBridge_hits_v1";
+inline constexpr uint32_t kHitsMagic = 0x48424444;  // "DDBH"
+inline constexpr uint32_t kHitsVersion = 1;
+inline constexpr uint32_t kHitRing = 64;
+
+struct HitEvent {
+    volatile uint32_t seq;
+    uint32_t formId;
+    float fraction;  // of the stand-in's DDDA max HP
+    float damage;    // DDDA damage (for the log)
+};
+
+struct Hits {
+    uint32_t magic;
+    uint32_t version;
+    volatile long written;
+    uint32_t reserved;
+    HitEvent ev[kHitRing];
+};
+
+static_assert(sizeof(HitEvent) == 16);
+static_assert(sizeof(Hits) == 16 + 64 * 16);
+
 static_assert(sizeof(Npc) == 24);
 static_assert(sizeof(Npcs) == 32 + 8 * 24);
 
